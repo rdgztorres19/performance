@@ -1,0 +1,725 @@
+Hardware and Operating System
+	•	Prefer fewer fast CPU cores over many slow ones depending on workload
+	•	Reduce context switching
+	•	CPU affinity and pinning
+	•	NUMA awareness
+	•	Avoid false sharing and cache line contention
+	•	SIMD and vectorization
+	•	Branch prediction friendly code
+	•	Avoid busy-wait loops
+	•	Batch processing instead of per-item execution
+	•	Avoid CPU throttling
+	•	Disable unstable turbo boost for latency-sensitive workloads
+	•	Disable Transparent HugePages (THP) for database workloads
+	•	Configure explicit HugePages to reduce TLB misses
+	•	Adjust filesystem cache pressure for database workloads
+	•	Control memory overcommit behavior
+	•	Optimize CPU governor settings for performance
+	•	Disable CPU frequency scaling for latency-sensitive workloads
+	•	Use CPU isolation (isolcpus) for dedicated workloads
+	•	Optimize interrupt handling and CPU affinity
+	•	Configure IRQ balancing
+	•	Use RDT (Resource Director Technology) for cache and memory bandwidth control
+
+Memory Management
+	•	Avoid page faults
+	•	Avoid swapping
+	•	Use memory pooling
+	•	Reuse buffers
+	•	Zero-copy patterns
+	•	Stack allocation when possible
+	•	Avoid heap fragmentation
+	•	Avoid Large Object Heap fragmentation in .NET
+	•	Memory alignment
+	•	Memory prefetching
+	•	Huge pages
+	•	Avoid unnecessary allocations
+	•	Cache-friendly memory layouts
+	•	Struct of Arrays instead of Array of Structs when iterating
+	•	Memory-mapped I/O for large file access
+	•	Use mlock() to prevent memory from being swapped
+	•	Memory prefetching hints (__builtin_prefetch)
+	•	Cache line alignment (64-byte alignment)
+	•	Memory barriers for lock-free programming
+	•	Use memory arenas/pools for allocation patterns
+	•	Custom allocators for specific use cases
+	•	Memory compaction strategies
+	•	TLB optimization (Translation Lookaside Buffer)
+	•	Memory bandwidth optimization
+	•	NUMA-aware memory allocation
+	•	Memory deduplication when appropriate
+	•	Use memory-mapped files for shared data
+
+Disk and Storage
+	•	Prefer SSD or NVMe over HDD
+	•	Sequential IO over random IO
+	•	Asynchronous IO
+	•	Write batching
+	•	Read-ahead tuning
+	•	Append-only storage
+	•	Memory-mapped files
+	•	Avoid frequent fsync calls
+	•	Avoid many small files
+	•	Preallocate files
+	•	Balance compression versus IO cost
+	•	Reduce filesystem metadata operations
+
+File IO
+	•	Stream files instead of loading entire files into memory
+	•	Choose correct IO chunk sizes
+	•	Use buffered streams
+	•	Async file APIs
+	•	Avoid frequent open and close operations
+	•	Bulk read and write operations
+	•	Avoid file locks
+	•	Cache file contents
+	•	Use RAM disks for temporary files
+	•	Avoid synchronous IO APIs
+	•	Use sendfile() for zero-copy file-to-socket transfers (Linux)
+	•	Use splice() for zero-copy pipe-to-socket transfers
+	•	Use vmsplice() for zero-copy user memory to pipe
+	•	Direct IO (O_DIRECT) to bypass page cache when appropriate
+	•	Use io_uring for high-performance async IO (Linux 5.1+)
+	•	Use AIO (Asynchronous IO) for non-blocking file operations
+	•	Preallocate file space to avoid fragmentation
+	•	Use fallocate() for file space preallocation
+	•	Optimize filesystem block size for workload
+	•	Use noatime mount option to avoid access time updates
+	•	Disable file system journaling for read-heavy workloads (with caution)
+	•	Use tmpfs for temporary files
+	•	Optimize directory structure to reduce path lookups
+	•	Use hard links instead of copying when possible
+
+Networking and IO
+	•	Use connection pooling
+	•	Keep-alive connections
+	•	Avoid chatty APIs
+	•	Batch network requests
+	•	Use binary protocols
+	•	Prefer HTTP/2 or HTTP/3
+	•	Avoid head-of-line blocking
+	•	Zero-copy networking
+	•	Use compression wisely
+	•	Apply backpressure
+	•	Cache DNS results
+	•	Reuse TLS sessions
+	•	Set correct timeouts
+	•	HTTP/3 and QUIC protocol
+	•	WebSocket connection pooling
+	•	gRPC for high-performance RPC
+	•	Protocol Buffers (protobuf) for serialization
+	•	Apache Avro for efficient data serialization
+	•	MessagePack for compact binary serialization
+	•	Compression algorithms (gzip, brotli, zstd, snappy)
+	•	TCP_NODELAY for low latency
+	•	SO_REUSEPORT for load distribution
+	•	Network interface bonding/teaming
+	•	Use epoll (Linux) or kqueue (BSD) for event-driven IO
+	•	Use io_uring for high-performance network IO
+	•	TCP fast open (TFO) for reduced connection latency
+	•	TCP window scaling for high-bandwidth connections
+	•	TCP selective acknowledgments (SACK)
+	•	TCP timestamp options for better RTT estimation
+	•	Use sendmmsg() and recvmmsg() for batch socket operations
+	•	SO_REUSEPORT for load distribution across processes
+	•	ZeroMQ for brokerless messaging (uses zero-copy internally)
+	•	DPDK (Data Plane Development Kit) for user-space networking
+	•	XDP (eXpress Data Path) for high-performance packet processing
+	•	SR-IOV for virtualized network performance
+	•	Network namespace isolation
+	•	Optimize socket buffer sizes (SO_RCVBUF, SO_SNDBUF)
+	•	Use TCP_CORK for batching small packets
+	•	Enable TCP_NODELAY to disable Nagle's algorithm
+	•	Use TLS session resumption (session tickets)
+	•	OCSP stapling for faster TLS handshakes
+	•	HTTP/2 server push for proactive resource delivery
+	•	HTTP/2 multiplexing to avoid head-of-line blocking
+	•	QUIC connection migration for mobile networks
+	•	Use connection coalescing for HTTP/2
+	•	Optimize MTU size (Path MTU Discovery)
+	•	Use jumbo frames when network supports it
+	•	Network packet batching (GRO, GSO)
+	•	RSS (Receive Side Scaling) for multi-core network processing
+	•	RPS (Receive Packet Steering) for load distribution
+	•	RFS (Receive Flow Steering) for CPU locality
+
+Databases
+	•	Proper indexing strategy
+	•	Composite indexes
+	•	Covering indexes
+	•	Avoid over-indexing
+	•	Small primary keys
+	•	Avoid random UUIDs as primary keys
+	•	Partitioning
+	•	Sharding
+	•	Read replicas
+	•	Avoid SELECT star
+	•	Limit selected columns and rows
+	•	Avoid N plus 1 queries
+	•	Batch inserts
+	•	Bulk updates
+	•	Use prepared statements
+	•	Analyze query plans
+	•	Avoid functions in WHERE clauses
+	•	Avoid leading wildcard LIKE queries
+	•	Use keyset pagination
+	•	Use connection pooling
+	•	Tune pool sizes
+	•	Database query plan caching
+	•	Prepared statement caching
+	•	Materialized views for expensive queries
+	•	Database views optimization
+	•	Full-text search indexes
+	•	Time-series database optimization (InfluxDB, TimescaleDB)
+	•	Columnar databases for analytics (ClickHouse, BigQuery)
+	•	Graph database optimization (Neo4j)
+	•	Database connection multiplexing
+	•	Read/write splitting at application level
+	•	Database query hints when necessary
+	•	Database statistics updates
+	•	Database vacuum/optimize operations
+	•	Database connection failover
+	•	Read consistency levels (read uncommitted, read committed, etc.)
+	•	Write consistency levels
+	•	Database replication lag monitoring
+	•	Hot and cold data separation
+	•	Data archiving strategies
+	•	Database partitioning by time
+	•	Indexing strategies for time-series data
+	•	Query result streaming for large datasets
+	•	Database connection string optimization
+	•	SSL/TLS optimization for database connections
+	•	PostgreSQL MVCC (Multi-Version Concurrency Control) optimization
+	•	PostgreSQL Write-Ahead Logging (WAL) tuning
+	•	PostgreSQL shared_buffers and work_mem tuning
+	•	PostgreSQL autovacuum tuning
+	•	PostgreSQL parallel query execution
+	•	PostgreSQL connection pooling (PgBouncer)
+	•	LSM trees (Log-Structured Merge) for write-heavy workloads (Cassandra, RocksDB)
+	•	LSM tree compaction strategies (leveled, tiered, size-tiered)
+	•	LSM tree bloom filters for read optimization
+	•	RocksDB block cache and write buffer tuning
+	•	RocksDB compression (snappy, zstd, lz4)
+	•	RocksDB memtable and SSTable optimization
+	•	Cassandra compaction strategies (SizeTiered, Leveled, TimeWindowed)
+	•	Cassandra read repair and hinted handoff
+	•	Cassandra consistency levels (ONE, QUORUM, ALL)
+	•	Cassandra token-aware routing
+	•	MongoDB WiredTiger cache size tuning
+	•	MongoDB write concern and read preference
+	•	MongoDB index intersection
+	•	MySQL InnoDB buffer pool tuning
+	•	MySQL InnoDB log file size optimization
+	•	MySQL query cache (deprecated but concepts apply)
+	•	Database connection multiplexing (PgBouncer, ProxySQL)
+	•	Read replicas with eventual consistency
+	•	Database sharding strategies (range, hash, directory-based)
+	•	Database partitioning strategies (horizontal, vertical)
+	•	Columnar storage for analytics (Parquet, ORC)
+	•	Database compression at storage level
+	•	Database write amplification reduction
+	•	Database read amplification optimization
+	•	Database checkpoint tuning
+	•	Database log file rotation and sizing
+	•	Database transaction log optimization
+	•	Database lock contention reduction
+	•	Database deadlock detection and prevention
+	•	Database connection pool sizing (formula: connections = ((core_count * 2) + effective_spindle_count))
+	•	Database query result set caching
+	•	Database connection string pooling
+	•	Database prepared statement pooling
+	•	Database connection keep-alive tuning
+	•	Database connection timeout optimization
+	•	Database connection retry strategies
+	•	Database connection failover with health checks
+	•	Database read/write splitting middleware
+	•	Database query routing based on read/write
+	•	Database connection draining for maintenance
+	•	Database connection warmup strategies
+
+Caching
+	•	In-memory caching
+	•	Distributed caching like Redis
+	•	Multi-level cache hierarchy
+	•	Correct TTL values
+	•	Clear cache invalidation strategy
+	•	Cache warming
+	•	Avoid cache stampede
+	•	Use LRU or LFU eviction
+	•	Write-through caching
+	•	Write-behind caching
+	•	Client-side caching
+	•	HTTP cache headers
+	•	CDN caching
+	•	Redis clustering for high availability
+	•	Redis persistence strategies (RDB, AOF)
+	•	Redis pipelining for batch operations
+	•	Redis pub/sub for real-time updates
+	•	Redis streams for event sourcing
+	•	Redis Lua scripts for atomic operations
+	•	Redis single-threaded model for lock-free operations
+	•	Redis memory optimization (ziplist, intset)
+	•	Redis hash slot distribution for clustering
+	•	Redis lazy free for non-blocking deletions
+	•	Redis memory eviction policies (allkeys-lru, volatile-lru, etc.)
+	•	Redis RDB compression
+	•	Redis AOF rewrite for log compaction
+	•	Redis connection pooling
+	•	Redis transaction batching (MULTI/EXEC)
+	•	Memcached for simple key-value caching
+	•	Memcached consistent hashing
+	•	Hazelcast for distributed caching
+	•	Hazelcast near-cache for local caching
+	•	Varnish HTTP accelerator for reverse proxy caching
+	•	Varnish VCL (Varnish Configuration Language) optimization
+	•	Varnish cache invalidation (PURGE, BAN)
+	•	Cache-aside pattern
+	•	Cache-through pattern
+	•	Database query result caching
+	•	Application-level caching strategies
+	•	Session caching
+	•	Cache compression for large values
+	•	Cache partitioning strategies
+	•	Cache coherency strategies
+	•	Distributed cache invalidation
+	•	Cache hit ratio optimization
+	•	Cache warming strategies
+	•	Cache preloading
+	•	Cache versioning for invalidation
+	•	Cache stampede prevention (probabilistic early expiration)
+	•	Cache aside with write-behind
+	•	Cache sharding strategies
+
+Message Queues and Event Streaming
+	•	Apache Kafka for high-throughput event streaming
+	•	Kafka partitioning strategies
+	•	Kafka consumer groups for parallel processing
+	•	Kafka batching and compression
+	•	Kafka retention policies
+	•	Kafka zero-copy using sendfile() and mmap()
+	•	Kafka log segment batching for sequential writes
+	•	Kafka compression (snappy, lz4, gzip, zstd)
+	•	Kafka idempotent producers for exactly-once semantics
+	•	Kafka transactional producers
+	•	Kafka log compaction for key-value topics
+	•	Kafka consumer fetch size tuning
+	•	Kafka producer batch size and linger.ms tuning
+	•	Kafka replication factor and min.insync.replicas
+	•	Kafka unclean leader election avoidance
+	•	RabbitMQ for reliable message queuing
+	•	RabbitMQ exchanges and routing
+	•	RabbitMQ message acknowledgments
+	•	RabbitMQ publisher confirms
+	•	RabbitMQ prefetch count tuning
+	•	RabbitMQ queue mirroring for HA
+	•	Amazon SQS for cloud message queuing
+	•	Azure Service Bus
+	•	Google Cloud Pub/Sub
+	•	Apache Pulsar for multi-tenancy
+	•	Apache Flink for stream processing
+	•	Kafka Streams for stateful stream processing
+	•	Apache Storm for real-time stream processing
+	•	Message queue patterns (pub/sub, point-to-point)
+	•	Event-driven architecture
+	•	Event sourcing with message queues
+	•	Change Data Capture (CDC) for database events
+	•	Message serialization optimization
+	•	Message batching
+	•	Dead letter queues for error handling
+	•	Message priority queues
+	•	Message deduplication
+	•	Idempotent message processing
+	•	Exactly-once delivery semantics
+	•	At-least-once delivery with idempotency
+	•	Message queue monitoring and alerting
+	•	ZeroMQ for brokerless messaging (uses lock-free algorithms)
+	•	ZeroMQ inproc transport for same-process communication
+	•	ZeroMQ message batching (ZMQ_SNDMORE)
+	•	Message queue backpressure handling
+	•	Consumer lag monitoring
+	•	Message queue partitioning strategies
+	•	Ordered message processing
+	•	Message queue compression at transport level
+
+Search Engines
+	•	Elasticsearch for full-text search
+	•	Elasticsearch index optimization
+	•	Elasticsearch sharding strategies
+	•	Elasticsearch replica configuration
+	•	Elasticsearch bulk API for indexing
+	•	Elasticsearch query optimization
+	•	Apache Solr for search
+	•	Search index warming
+	•	Search result caching
+	•	Faceted search optimization
+	•	Search relevance tuning
+
+Concurrency and Threading
+	•	Avoid global locks
+	•	Use fine-grained locking
+	•	Prefer lock-free algorithms
+	•	Use compare-and-swap operations
+	•	Avoid deadlocks
+	•	Avoid livelocks
+	•	Use thread pools
+	•	Proper thread pool sizing
+	•	Work-stealing schedulers
+	•	Avoid blocking calls
+	•	Avoid sync-over-async
+	•	Use async and await correctly
+	•	Use cancellation tokens
+	•	Throttling and rate limiting
+	•	Producer consumer patterns
+	•	Immutable data structures
+	•	Actor model (Akka, Orleans)
+	•	Reactive streams
+	•	Backpressure handling
+
+Data Structures
+	•	Choose data structures based on access patterns
+	•	Prefer arrays over lists when size is fixed
+	•	Prefer array-backed collections over linked lists
+	•	Use hash maps for constant-time lookups
+	•	Pre-size hash tables
+	•	Avoid hash collisions
+	•	Use struct keys instead of string keys
+	•	Custom equality comparers
+	•	Trees versus hash tables tradeoffs
+	•	Balanced trees like AVL or Red-Black
+	•	B-trees and B-plus trees
+	•	Tries and prefix trees
+	•	Bloom filters
+	•	Ring buffers
+	•	Queues and deques
+	•	Priority queues and heaps
+	•	Bitsets and bit arrays
+	•	Sparse arrays
+	•	Avoid pointer-heavy structures
+	•	Flat data structures
+	•	Index-based references instead of object references
+
+Algorithms
+	•	Choose optimal Big O complexity
+	•	Avoid nested loops on large datasets
+	•	Binary search instead of linear search
+	•	Two-pointer technique
+	•	Sliding window
+	•	Divide and conquer
+	•	Greedy algorithms
+	•	Dynamic programming
+	•	Memoization
+	•	Prefer iterative over recursive solutions
+	•	Batch processing
+	•	Parallel algorithms
+	•	SIMD-friendly algorithms
+	•	Avoid recomputation
+	•	Early exits
+	•	Short-circuit logic
+	•	Branchless programming when appropriate
+	•	Loop unrolling for performance-critical loops
+	•	Loop tiling/blocking for cache optimization
+	•	Algorithm vectorization for SIMD
+	•	Optimistic concurrency control algorithms
+	•	Lock-free data structure algorithms
+	•	Wait-free algorithms for real-time systems
+
+System Design
+	•	Design for scalability from the start
+	•	Stateless services
+	•	Minimize network hops
+	•	Avoid chatty service communication
+	•	Prefer asynchronous communication
+	•	Event-driven architecture
+	•	Design for failure
+	•	Apply backpressure everywhere
+	•	Idempotent operations
+	•	Graceful degradation
+	•	Load balancing
+	•	Rate limiting
+	•	Traffic shaping
+	•	Circuit breakers
+	•	Retry with exponential backoff
+	•	CQRS
+	•	Event sourcing
+	•	Data partitioning strategies
+	•	Polyglot persistence
+	•	Append-only logs
+	•	Cache hierarchies
+	•	Horizontal scaling
+	•	Vertical scaling when necessary
+	•	Auto-scaling rules
+	•	Multi-region deployments
+	•	Active-active versus active-passive
+	•	Consensus algorithms like Raft
+	•	Latency budgets
+	•	Tail latency optimization
+	•	Hot path isolation
+	•	API Gateway for request routing and aggregation
+	•	Service mesh (Istio, Linkerd) for microservices communication
+	•	Load balancer algorithms (round-robin, least connections, IP hash)
+	•	Health checks and automatic failover
+	•	Bulkhead pattern for fault isolation
+	•	Saga pattern for distributed transactions
+	•	Two-phase commit for distributed transactions
+	•	Eventual consistency patterns
+	•	CQRS read models optimization
+	•	Event sourcing snapshots
+	•	Database read/write splitting
+	•	Blue-green deployments
+	•	Canary deployments
+	•	Feature flags for gradual rollouts
+	•	A/B testing infrastructure
+	•	Distributed tracing (Jaeger, Zipkin)
+	•	Service discovery
+	•	Configuration management
+	•	Secret management
+	•	API versioning strategies
+	•	GraphQL query optimization
+	•	GraphQL DataLoader for N+1 prevention
+	•	REST API response compression
+	•	API rate limiting per user/IP
+	•	Request/response compression
+	•	Object storage (S3, Azure Blob, GCS) for static assets
+	•	Edge computing for low latency
+	•	CDN for static content delivery
+	•	WebAssembly for client-side performance
+	•	Serverless function optimization
+	•	Container optimization
+	•	Kubernetes pod resource limits
+	•	Kubernetes horizontal pod autoscaling
+	•	Kubernetes vertical pod autoscaling
+	•	Container image optimization
+	•	Multi-stage Docker builds
+	•	Nginx event-driven architecture (epoll-based)
+	•	Nginx worker processes and worker connections tuning
+	•	Nginx sendfile and tcp_nopush for zero-copy
+	•	Nginx gzip_static for pre-compressed files
+	•	Nginx open_file_cache for file descriptor caching
+	•	Nginx proxy_cache for reverse proxy caching
+	•	Nginx upstream keepalive connections
+	•	Nginx rate limiting (limit_req, limit_conn)
+	•	Nginx SSL session caching
+	•	Nginx worker CPU affinity
+	•	Nginx aio (asynchronous I/O) for file operations
+	•	Nginx directio for large file serving
+	•	Nginx sendfile_max_chunk tuning
+	•	Nginx multi_accept for better connection handling
+	•	Nginx accept_mutex for connection distribution
+	•	Nginx deferred accept for reduced CPU usage
+	•	Apache mod_evnet for event-driven MPM
+	•	Apache worker/event MPM tuning
+	•	Apache KeepAlive and MaxKeepAliveRequests
+	•	Apache mod_cache for HTTP caching
+	•	Apache mod_deflate for compression
+	•	HAProxy connection pooling and keepalive optimization
+	•	HAProxy stick tables for session persistence
+	•	HAProxy health checks and automatic failover
+	•	HAProxy ACL optimization for routing decisions
+	•	HAProxy connection limits and queuing tuning
+	•	HAProxy SSL termination and session reuse
+	•	HAProxy HTTP/2 and WebSocket support
+	•	HAProxy load balancing algorithms (roundrobin, leastconn, source, etc.)
+	•	HAProxy rate limiting (connection, request, bandwidth)
+	•	HAProxy content switching (URL, header, path, host-based)
+	•	HAProxy connection draining and graceful shutdown
+	•	HAProxy dynamic server weight adjustment
+	•	HAProxy DNS-based service discovery
+	•	HAProxy stats and monitoring for performance metrics
+	•	HAProxy stats configuration
+	•	HAProxy health check configuration
+	•	HAProxy load balancing configuration
+	•	HAProxy SSL/TLS configuration
+	•	HAProxy HTTP/2 configuration
+	•	HAProxy compression configuration
+	•	HAProxy caching configuration
+
+.NET and C# Performance
+	•	Use Server GC
+	•	Tune GC heaps
+	•	Avoid allocations in hot paths
+	•	Object pooling
+	•	Prefer structs for small data
+	•	Avoid boxing and unboxing
+	•	Use Span and Memory
+	•	Use ArrayPool
+	•	Avoid LINQ in hot paths
+	•	Avoid closures
+	•	Reuse StringBuilder
+	•	Avoid exceptions for control flow
+	•	Avoid reflection
+	•	Use source generators
+	•	Use unsafe code only when justified
+	•	Use stackalloc
+	•	Avoid allocations inside loops
+	•	Use ConfigureAwait false
+	•	Seal classes when possible
+	•	Avoid virtual calls in hot paths
+	•	Use System.Text.Json over Newtonsoft.Json
+	•	Use IMemoryCache for in-memory caching
+	•	Use IHttpClientFactory for HTTP clients
+	•	Use Entity Framework compiled queries
+	•	Use Dapper for high-performance database access
+	•	Use ValueTask for async operations
+	•	Use Channels for producer-consumer scenarios
+	•	Use System.IO.Pipelines for high-performance IO
+
+Logging and Observability
+	•	Asynchronous logging
+	•	Correct log levels
+	•	Log sampling
+	•	Structured logging
+	•	Avoid logging in hot paths
+	•	Avoid string interpolation when logging is disabled
+	•	Batch log writes
+	•	Prefer metrics over logs
+	•	Distributed tracing
+	•	Continuous profiling
+	•	APM tools (Application Performance Monitoring)
+	•	Real-time alerting
+	•	Log aggregation (ELK stack, Splunk)
+	•	Metrics collection (Prometheus, Datadog)
+	•	Error tracking (Sentry, Rollbar)
+	•	Performance dashboards
+	•	Service level indicators (SLIs)
+	•	Service level objectives (SLOs)
+	•	Service level agreements (SLAs)
+
+Media and Content Optimization
+	•	Image optimization and compression
+	•	WebP, AVIF image formats
+	•	Lazy loading for images
+	•	Responsive images (srcset)
+	•	Image CDN optimization
+	•	Video streaming optimization
+	•	Video codec selection (H.264, H.265, VP9, AV1)
+	•	Adaptive bitrate streaming
+	•	Video thumbnail generation
+	•	Audio compression
+	•	Font optimization and subsetting
+	•	Web font loading strategies
+	•	CSS minification
+	•	JavaScript minification and bundling
+	•	Tree shaking for JavaScript
+	•	Code splitting for JavaScript
+	•	Asset versioning and cache busting
+
+Compilation and Code Generation
+	•	Ahead-of-Time (AOT) compilation for reduced runtime overhead
+	•	Profile-Guided Optimization (PGO) using execution data
+	•	Link-Time Optimization (LTO) for cross-module optimizations
+	•	Interprocedural Optimization (IPO) across function boundaries
+	•	Loop unrolling by compiler optimizations
+	•	Function inlining for hot paths
+	•	Dead code elimination
+	•	Constant folding and propagation
+	•	Register allocation optimization
+	•	Instruction scheduling optimization
+	•	Vectorization by compiler (auto-vectorization)
+	•	Branch prediction hints in code
+	•	Compiler-specific optimizations (-O3, -march=native)
+	•	Whole Program Optimization (WPO)
+	•	Cross-module optimization
+	•	Binary optimization tools (BOLT - Binary Optimization and Layout Tool)
+	•	Code layout optimization for instruction cache
+	•	Hot/cold code splitting
+	•	Function reordering based on call frequency
+	•	Basic block reordering for better cache locality
+	•	Just-In-Time (JIT) compilation optimization
+	•	JIT warmup strategies
+	•	JIT code cache optimization
+	•	Native code generation optimization
+	•	Assembly code optimization for critical paths
+	•	Compiler intrinsics for SIMD operations
+	•	Compiler-specific pragmas and hints
+	•	Optimization flags per compilation unit
+	•	Incremental compilation for faster builds
+	•	Parallel compilation for build performance
+
+Measurement and Optimization
+	•	Measure before optimizing
+	•	CPU profiling
+	•	Memory profiling
+	•	IO profiling
+	•	Benchmarking
+	•	Load testing
+	•	Stress testing
+	•	Flame graphs
+	•	Percentile metrics like P95 and P99
+	•	Real traffic replay
+	•	Performance regression tests
+	•	Define SLAs and SLOs
+	•	Performance budgets
+	•	Continuous performance monitoring
+	•	Load testing tools (JMeter, Gatling, k6)
+	•	Profiling tools (perf, dotTrace, Visual Studio Profiler)
+	•	APM integration
+	•	Real User Monitoring (RUM)
+	•	Synthetic monitoring
+	•	Performance testing in CI/CD
+	•	Intel Advisor for SIMD vectorization analysis
+	•	Intel VTune for performance profiling
+	•	perf (Linux Performance Counters) for system profiling
+	•	valgrind for memory and performance analysis
+	•	Application Performance Monitoring (APM) tools
+	•	Continuous profiling (Pyroscope, Parca)
+	•	CPU flame graphs for hot path identification
+	•	Memory allocation profiling
+	•	Lock contention profiling
+	•	I/O wait profiling
+	•	Network latency profiling
+	•	Database query profiling
+	•	End-to-end latency tracing
+	•	Distributed tracing for microservices
+	•	Performance regression detection
+	•	Automated performance testing
+	•	Performance budgets in CI/CD
+	•	Real user metrics (RUM) collection
+	•	Synthetic transaction monitoring
+	•	Performance anomaly detection
+	•	Performance trend analysis
+	•	Capacity planning based on metrics
+	•	Performance SLA monitoring
+	•	Performance alerting and on-call
+	•	Performance dashboard creation
+	•	Performance metrics aggregation
+	•	Performance data retention strategies
+	•	Performance log correlation
+	•	Performance bottleneck identification
+	•	Performance optimization prioritization
+	•	Performance impact assessment
+	•	Performance testing environments
+	•	Performance test data management
+	•	Performance test automation
+	•	Performance baseline establishment
+	•	Performance comparison across versions
+	•	Performance degradation tracking
+	•	Performance improvement measurement
+	•	Performance ROI calculation
+
+Performance Anti Patterns
+	•	Premature optimization
+	•	Over logging
+	•	Over indexing
+	•	Too many microservices
+	•	Blocking async code
+	•	Chatty APIs
+	•	Caching without strategy
+	•	Ignoring metrics
+	•	Synchronous calls in async contexts
+	•	Database queries in loops
+	•	Over-fetching data
+	•	Under-fetching data (N+1 queries)
+	•	Ignoring connection pool limits
+	•	Not monitoring production performance
+	•	Optimizing without measuring
+	•	Ignoring database query plans
+	•	Not using prepared statements
+	•	Ignoring cache hit rates
+	•	Not setting appropriate timeouts
+	•	Ignoring memory leaks
+	•	Not profiling production workloads
+	•	Over-engineering solutions
+	•	Not considering network latency
+	•	Ignoring serialization costs
+	•	Not optimizing hot paths
+
