@@ -11,9 +11,9 @@ const fs = require('fs');
 const path = require('path');
 const GhostAdminAPI = require('@tryghost/admin-api');
 
-// Configuración
-const GHOST_URL = 'http://localhost:2368';
-const GHOST_ADMIN_API_KEY = '694e153e2374c1121cd015e4:a92f5dd286ab73a128e2aa85049b08cdf98706a59ea539c245bd8dd812a06524';
+// Configuración - usa variables de entorno o defaults
+const GHOST_URL = process.env.GHOST_URL || 'http://localhost:2368';
+const GHOST_ADMIN_API_KEY = process.env.GHOST_ADMIN_API_KEY || '694e153e2374c1121cd015e4:a92f5dd286ab73a128e2aa85049b08cdf98706a59ea539c245bd8dd812a06524';
 
 // Inicializar Ghost Admin API
 const api = new GhostAdminAPI({

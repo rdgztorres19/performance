@@ -1,21 +1,31 @@
 # Node
-/ghost-blog/node_modules/
+node_modules/
 npm-debug.log*
-/ghost-blog/yarn.lock
+yarn.lock
+package-lock.json
 
-# Ghost (NUNCA versionar)
-/ghost-blog/current/
-/ghost-blog/versions/
-/ghost-blog/core/
-/ghost-blog/content/
-/ghost-blog/.config.*
-/ghost-blog/.ghost-cli
-/ghost-blog/.ghostpid
+# Ghost (NUNCA versionar - debe estar fuera del repo)
+ghost-blog/current/
+ghost-blog/versions/
+ghost-blog/core/
+ghost-blog/content/
+ghost-blog/.ghost-cli
+ghost-blog/.ghostpid
+ghost-blog/config.*.json
+ghost-blog/.config.*
 
 # Configs sensibles
-/ghost-blog/config.development.json
-/ghost-blog/config.production.json
+config.development.json
+config.production.json
+.env
 
 # OS
 .DS_Store
-.env
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
