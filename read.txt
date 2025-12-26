@@ -2,3 +2,4 @@
 User ghost
 Password: ghost
 Folder: /var/www/ghost-blog
+/var/www/ghost-blog/performance/ghost-blog

@@ -1,22 +1,21 @@
-# Ghost Blog
-/ghost-blog/node_modules
-/ghost-blog/package-lock.json
-# /ghost-blog/config.*.json
-# /ghost-blog/content/data/*.db
-/ghost-blog/content/logs/*
-# /ghost-blog/content/files/*
-# /ghost-blog/content/media/*
-!/ghost-blog/content/logs/.gitkeep
-# !/ghost-blog/content/files/.gitkeep
-# !/ghost-blog/content/media/.gitkeep
+# Node
+/ghost-blog/node_modules/
+npm-debug.log*
+/ghost-blog/yarn.lock
 
-# OS files
+# Ghost (NUNCA versionar)
+/ghost-blog/current/
+/ghost-blog/versions/
+/ghost-blog/core/
+/ghost-blog/content/
+/ghost-blog/.config.*
+/ghost-blog/.ghost-cli
+/ghost-blog/.ghostpid
+
+# Configs sensibles
+/ghost-blog/config.development.json
+/ghost-blog/config.production.json
+
+# OS
 .DS_Store
-Thumbs.db
-
-# Editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+.env
