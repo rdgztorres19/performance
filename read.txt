@@ -1,0 +1,4 @@
+66.179.188.92
+User ghost
+Password: ghost
+Folder: /var/www/ghost-blog
