@@ -1,0 +1,33 @@
+{
+  "url": "http://localhost:2368/",
+  "server": {
+    "port": 2368,
+    "host": "127.0.0.1"
+  },
+  "database": {
+    "client": "mysql",
+    "connection": {
+      "host": "localhost",
+      "port": 3306,
+      "user": "root",
+      "password": "sbrQp10",
+      "database": "ghost_local"
+    }
+  },
+  "mail": {
+    "transport": "Direct"
+  },
+  "logging": {
+    "transports": [
+      "file",
+      "stdout"
+    ]
+  },
+  "process": "local",
+  "security": {
+    "staffDeviceVerification": false
+  },
+  "paths": {
+    "contentPath": "/Users/rdgztorres19/Documents/Projects/performance/ghost-blog/content"
+  }
+}

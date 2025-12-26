@@ -1,0 +1,13 @@
+{
+  "name": "ghost-blog",
+  "version": "1.0.0",
+  "description": "Scripts para gestionar artículos en Ghost",
+  "scripts": {
+    "insert-article": "node insert-article.js",
+    "insert": "node insert-article.js"
+  },
+  "dependencies": {
+    "@tryghost/admin-api": "^1.14.3",
+    "mysql2": "^3.16.0"
+  }
+}

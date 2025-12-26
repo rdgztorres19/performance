@@ -1,0 +1,827 @@
+CATEGORÍAS PRINCIPALES
+=====================
+Hardware & Operating System
+Memory Management
+Disk I/O
+File IO
+Networking
+Databases
+Caching
+Message Queues
+Search Engines
+Concurrency
+Data Structures
+Algorithms
+System Design
+.NET/C# Performance
+Logging
+Media Processing
+Compilation
+Measurement
+Anti-Patterns
+
+SUBCATEGORÍAS Y TECNOLOGÍAS
+============================
+CPU Optimization
+Memory Allocation
+Query Optimization
+Connection Pooling
+Indexing
+Async Programming
+Threading
+Caching Strategies
+Load Balancing
+Zero Allocation
+Garbage Collection
+SIMD
+Vectorization
+NUMA
+Cache Line Alignment
+Memory Pooling
+Object Pooling
+Zero-Copy
+Async IO
+Batch Processing
+Streaming
+Compression
+Serialization
+Protocol Buffers
+gRPC
+HTTP/2
+HTTP/3
+QUIC
+WebSocket
+TCP Optimization
+TLS Optimization
+Redis
+Memcached
+Kafka
+RabbitMQ
+PostgreSQL
+MySQL
+MongoDB
+Cassandra
+RocksDB
+Elasticsearch
+Solr
+Nginx
+Apache
+HAProxy
+Kubernetes
+Docker
+CDN
+Edge Computing
+Serverless
+Microservices
+Event-Driven
+CQRS
+Event Sourcing
+GraphQL
+REST API
+API Gateway
+Service Mesh
+Distributed Tracing
+Profiling
+Benchmarking
+Load Testing
+APM
+Monitoring
+Observability
+Image Optimization
+Video Streaming
+JavaScript Optimization
+CSS Optimization
+AOT Compilation
+JIT Optimization
+PGO
+LTO
+Compiler Optimization
+Assembly Optimization
+Lock-Free
+Wait-Free
+Actor Model
+Reactive Streams
+Backpressure
+Rate Limiting
+Circuit Breaker
+Retry Strategies
+Health Checks
+Auto-Scaling
+Blue-Green Deployment
+Canary Deployment
+Feature Flags
+A/B Testing
+Database Sharding
+Database Partitioning
+Read Replicas
+Write-Ahead Logging
+MVCC
+LSM Trees
+Bloom Filters
+B-Trees
+Hash Tables
+Ring Buffers
+Priority Queues
+Binary Search
+Dynamic Programming
+Memoization
+Divide and Conquer
+Greedy Algorithms
+Parallel Algorithms
+Branch Prediction
+Loop Unrolling
+Cache Optimization
+TLB Optimization
+IRQ Balancing
+CPU Affinity
+Context Switching
+False Sharing
+Huge Pages
+Memory-Mapped Files
+Direct IO
+io_uring
+epoll
+kqueue
+DPDK
+XDP
+SR-IOV
+RSS
+RPS
+RFS
+TCP_NODELAY
+SO_REUSEPORT
+Connection Keep-Alive
+DNS Caching
+TLS Session Resumption
+OCSP Stapling
+HTTP/2 Server Push
+HTTP/2 Multiplexing
+QUIC Connection Migration
+Path MTU Discovery
+Jumbo Frames
+Packet Batching
+Network Namespace
+Socket Buffer Optimization
+TCP Fast Open
+TCP Window Scaling
+TCP Selective Acknowledgments
+sendfile
+splice
+vmsplice
+sendmmsg
+recvmmsg
+ZeroMQ
+PgBouncer
+ProxySQL
+InfluxDB
+TimescaleDB
+ClickHouse
+BigQuery
+Neo4j
+Parquet
+ORC
+Snappy
+LZ4
+Zstd
+Gzip
+Brotli
+Avro
+MessagePack
+Kafka Streams
+Apache Flink
+Apache Storm
+Apache Pulsar
+Amazon SQS
+Azure Service Bus
+Google Cloud Pub/Sub
+Hazelcast
+Varnish
+ELK Stack
+Splunk
+Prometheus
+Datadog
+Sentry
+Rollbar
+Jaeger
+Zipkin
+Pyroscope
+Parca
+Intel Advisor
+Intel VTune
+perf
+valgrind
+dotTrace
+Visual Studio Profiler
+JMeter
+Gatling
+k6
+WebP
+AVIF
+H.264
+H.265
+VP9
+AV1
+Adaptive Bitrate
+Tree Shaking
+Code Splitting
+WebAssembly
+Span<T>
+Memory<T>
+ArrayPool
+ValueTask
+Channels
+System.IO.Pipelines
+System.Text.Json
+IHttpClientFactory
+Entity Framework
+Dapper
+Server GC
+ConfigureAwait
+Source Generators
+stackalloc
+Struct Optimization
+StringBuilder Reuse
+LINQ Optimization
+Reflection Avoidance
+Exception Handling
+Virtual Calls
+Sealed Classes
+Boxing/Unboxing
+Closures
+Allocation Avoidance
+Heap Fragmentation
+Large Object Heap
+Struct of Arrays
+Array of Structs
+Cache-Friendly Layouts
+Memory Barriers
+Lock-Free Programming
+Compare-and-Swap
+Work-Stealing
+Thread Pools
+Async/Await
+Cancellation Tokens
+Throttling
+Producer-Consumer
+Immutable Data Structures
+Fine-Grained Locking
+Deadlock Avoidance
+Livelock Avoidance
+Blocking Avoidance
+Sync-over-Async
+Batch Inserts
+Bulk Updates
+Prepared Statements
+Query Plan Caching
+Materialized Views
+Full-Text Search
+Time-Series Optimization
+Columnar Databases
+Graph Databases
+Connection Multiplexing
+Read/Write Splitting
+Database Views
+Query Hints
+Database Statistics
+Vacuum Operations
+Connection Failover
+Consistency Levels
+Replication Lag
+Hot/Cold Data Separation
+Data Archiving
+Partitioning by Time
+Query Result Streaming
+Connection String Optimization
+SSL/TLS Database Optimization
+PostgreSQL Tuning
+MySQL Tuning
+MongoDB Tuning
+Cassandra Tuning
+RocksDB Tuning
+LSM Compaction
+Bloom Filters
+Block Cache
+Write Buffer
+Memtable
+SSTable
+WiredTiger
+InnoDB
+PgBouncer Pooling
+ProxySQL Multiplexing
+Read Replicas
+Eventual Consistency
+Sharding Strategies
+Partitioning Strategies
+Columnar Storage
+Database Compression
+Write Amplification
+Read Amplification
+Checkpoint Tuning
+Log File Rotation
+Transaction Log Optimization
+Lock Contention
+Deadlock Detection
+Connection Pool Sizing
+Query Result Caching
+Prepared Statement Pooling
+Connection Keep-Alive
+Connection Timeout
+Connection Retry
+Health Checks
+Connection Draining
+Connection Warmup
+In-Memory Caching
+Distributed Caching
+Multi-Level Cache
+TTL Optimization
+Cache Invalidation
+Cache Warming
+Cache Stampede
+LRU Eviction
+LFU Eviction
+Write-Through
+Write-Behind
+Client-Side Caching
+HTTP Cache Headers
+CDN Caching
+Redis Clustering
+Redis Persistence
+Redis Pipelining
+Redis Pub/Sub
+Redis Streams
+Redis Lua Scripts
+Redis Memory Optimization
+Redis Hash Slots
+Redis Lazy Free
+Redis Eviction Policies
+Redis RDB Compression
+Redis AOF Rewrite
+Redis Connection Pooling
+Redis Transactions
+Memcached Hashing
+Hazelcast Near-Cache
+Varnish VCL
+Varnish Cache Invalidation
+Cache-Aside Pattern
+Cache-Through Pattern
+Database Query Caching
+Application-Level Caching
+Session Caching
+Cache Compression
+Cache Partitioning
+Cache Coherency
+Distributed Cache Invalidation
+Cache Hit Ratio
+Cache Preloading
+Cache Versioning
+Cache Sharding
+Kafka Partitioning
+Kafka Consumer Groups
+Kafka Batching
+Kafka Compression
+Kafka Idempotent Producers
+Kafka Transactions
+Kafka Log Compaction
+Kafka Fetch Size
+Kafka Batch Size
+Kafka Replication
+Kafka Leader Election
+RabbitMQ Exchanges
+RabbitMQ Routing
+RabbitMQ Acknowledgments
+RabbitMQ Publisher Confirms
+RabbitMQ Prefetch
+RabbitMQ Queue Mirroring
+Message Queue Patterns
+Event-Driven Architecture
+Event Sourcing
+Change Data Capture
+Message Serialization
+Message Batching
+Dead Letter Queues
+Message Priority
+Message Deduplication
+Idempotent Processing
+Exactly-Once Delivery
+At-Least-Once Delivery
+Message Queue Monitoring
+ZeroMQ Inproc
+ZeroMQ Batching
+Message Queue Backpressure
+Consumer Lag
+Message Queue Partitioning
+Ordered Processing
+Message Queue Compression
+Elasticsearch Indexing
+Elasticsearch Sharding
+Elasticsearch Replicas
+Elasticsearch Bulk API
+Elasticsearch Query Optimization
+Search Index Warming
+Search Result Caching
+Faceted Search
+Search Relevance
+Global Locks
+Fine-Grained Locking
+Lock-Free Algorithms
+Compare-and-Swap
+Deadlocks
+Livelocks
+Thread Pools
+Thread Pool Sizing
+Work-Stealing Schedulers
+Blocking Calls
+Sync-over-Async
+Async/Await
+Cancellation Tokens
+Throttling
+Rate Limiting
+Producer-Consumer Patterns
+Immutable Data Structures
+Actor Model
+Reactive Streams
+Backpressure Handling
+Data Structure Selection
+Arrays vs Lists
+Hash Maps
+Hash Table Pre-sizing
+Hash Collisions
+Struct Keys
+Custom Equality
+Trees vs Hash Tables
+Balanced Trees
+B-Trees
+B-Plus Trees
+Tries
+Prefix Trees
+Bloom Filters
+Ring Buffers
+Queues
+Deques
+Priority Queues
+Heaps
+Bitsets
+Bit Arrays
+Sparse Arrays
+Pointer-Heavy Structures
+Flat Data Structures
+Index-Based References
+Big O Complexity
+Nested Loops
+Binary Search
+Linear Search
+Two-Pointer Technique
+Sliding Window
+Divide and Conquer
+Greedy Algorithms
+Dynamic Programming
+Memoization
+Iterative vs Recursive
+Batch Processing
+Parallel Algorithms
+SIMD-Friendly Algorithms
+Recomputation Avoidance
+Early Exits
+Short-Circuit Logic
+Branchless Programming
+Loop Unrolling
+Loop Tiling
+Loop Blocking
+Cache Optimization
+Algorithm Vectorization
+Optimistic Concurrency
+Lock-Free Data Structures
+Wait-Free Algorithms
+Scalability Design
+Stateless Services
+Network Hops
+Chatty Communication
+Asynchronous Communication
+Event-Driven Architecture
+Failure Design
+Backpressure
+Idempotent Operations
+Graceful Degradation
+Load Balancing
+Rate Limiting
+Traffic Shaping
+Circuit Breakers
+Exponential Backoff
+CQRS
+Event Sourcing
+Data Partitioning
+Polyglot Persistence
+Append-Only Logs
+Cache Hierarchies
+Horizontal Scaling
+Vertical Scaling
+Auto-Scaling
+Multi-Region
+Active-Active
+Active-Passive
+Consensus Algorithms
+Raft
+Latency Budgets
+Tail Latency
+Hot Path Isolation
+API Gateway
+Service Mesh
+Istio
+Linkerd
+Load Balancer Algorithms
+Health Checks
+Automatic Failover
+Bulkhead Pattern
+Saga Pattern
+Two-Phase Commit
+Eventual Consistency
+CQRS Read Models
+Event Sourcing Snapshots
+Database Read/Write Splitting
+Blue-Green Deployments
+Canary Deployments
+Feature Flags
+Gradual Rollouts
+A/B Testing
+Distributed Tracing
+Service Discovery
+Configuration Management
+Secret Management
+API Versioning
+GraphQL Optimization
+GraphQL DataLoader
+REST API Compression
+API Rate Limiting
+Request/Response Compression
+Object Storage
+S3
+Azure Blob
+GCS
+Edge Computing
+CDN
+WebAssembly
+Serverless Optimization
+Container Optimization
+Kubernetes Pod Limits
+Kubernetes HPA
+Kubernetes VPA
+Container Image Optimization
+Multi-Stage Docker Builds
+Nginx Event-Driven
+Nginx Workers
+Nginx Connections
+Nginx Sendfile
+Nginx TCP_NOPUSH
+Nginx Gzip Static
+Nginx Open File Cache
+Nginx Proxy Cache
+Nginx Upstream Keepalive
+Nginx Rate Limiting
+Nginx SSL Session Caching
+Nginx CPU Affinity
+Nginx AIO
+Nginx DirectIO
+Nginx Sendfile Max Chunk
+Nginx Multi Accept
+Nginx Accept Mutex
+Nginx Deferred Accept
+Apache mod_event
+Apache Worker MPM
+Apache Event MPM
+Apache KeepAlive
+Apache MaxKeepAliveRequests
+Apache mod_cache
+Apache mod_deflate
+HAProxy Connection Pooling
+HAProxy Keepalive
+HAProxy Stick Tables
+HAProxy Health Checks
+HAProxy Failover
+HAProxy ACL
+HAProxy Connection Limits
+HAProxy Queuing
+HAProxy SSL Termination
+HAProxy Session Reuse
+HAProxy HTTP/2
+HAProxy WebSocket
+HAProxy Load Balancing
+HAProxy Rate Limiting
+HAProxy Content Switching
+HAProxy Connection Draining
+HAProxy Server Weight
+HAProxy DNS Discovery
+HAProxy Stats
+HAProxy Monitoring
+Server GC
+GC Heap Tuning
+Hot Path Allocations
+Object Pooling
+Structs for Small Data
+Boxing/Unboxing
+Span<T>
+Memory<T>
+ArrayPool
+LINQ in Hot Paths
+Closures
+StringBuilder Reuse
+Exceptions for Control Flow
+Reflection
+Source Generators
+Unsafe Code
+stackalloc
+Allocations in Loops
+ConfigureAwait False
+Sealed Classes
+Virtual Calls in Hot Paths
+System.Text.Json
+Newtonsoft.Json
+IMemoryCache
+IHttpClientFactory
+Entity Framework Compiled Queries
+Dapper
+ValueTask
+Channels
+System.IO.Pipelines
+Asynchronous Logging
+Log Levels
+Log Sampling
+Structured Logging
+Logging in Hot Paths
+String Interpolation
+Batch Log Writes
+Metrics over Logs
+Distributed Tracing
+Continuous Profiling
+APM Tools
+Real-Time Alerting
+Log Aggregation
+Metrics Collection
+Error Tracking
+Performance Dashboards
+SLIs
+SLOs
+SLAs
+Image Optimization
+Image Compression
+WebP
+AVIF
+Lazy Loading
+Responsive Images
+srcset
+Image CDN
+Video Streaming
+Video Codecs
+H.264
+H.265
+VP9
+AV1
+Adaptive Bitrate
+Video Thumbnails
+Audio Compression
+Font Optimization
+Font Subsetting
+Web Font Loading
+CSS Minification
+JavaScript Minification
+JavaScript Bundling
+Tree Shaking
+Code Splitting
+Asset Versioning
+Cache Busting
+AOT Compilation
+PGO
+LTO
+IPO
+Loop Unrolling
+Function Inlining
+Dead Code Elimination
+Constant Folding
+Constant Propagation
+Register Allocation
+Instruction Scheduling
+Vectorization
+Branch Prediction Hints
+Compiler Optimizations
+WPO
+Cross-Module Optimization
+BOLT
+Code Layout
+Hot/Cold Code Splitting
+Function Reordering
+Basic Block Reordering
+JIT Compilation
+JIT Warmup
+JIT Code Cache
+Native Code Generation
+Assembly Optimization
+Compiler Intrinsics
+SIMD Operations
+Compiler Pragmas
+Optimization Flags
+Incremental Compilation
+Parallel Compilation
+Measure Before Optimizing
+CPU Profiling
+Memory Profiling
+IO Profiling
+Benchmarking
+Load Testing
+Stress Testing
+Flame Graphs
+Percentile Metrics
+P95
+P99
+Real Traffic Replay
+Performance Regression Tests
+SLAs
+SLOs
+Performance Budgets
+Continuous Monitoring
+Load Testing Tools
+Profiling Tools
+APM Integration
+RUM
+Synthetic Monitoring
+CI/CD Performance Testing
+Intel Advisor
+Intel VTune
+perf
+valgrind
+Application Performance Monitoring
+Continuous Profiling
+CPU Flame Graphs
+Memory Allocation Profiling
+Lock Contention Profiling
+IO Wait Profiling
+Network Latency Profiling
+Database Query Profiling
+End-to-End Latency Tracing
+Distributed Tracing
+Performance Regression Detection
+Automated Performance Testing
+Performance Budgets CI/CD
+Real User Metrics
+Synthetic Transaction Monitoring
+Performance Anomaly Detection
+Performance Trend Analysis
+Capacity Planning
+Performance SLA Monitoring
+Performance Alerting
+Performance Dashboards
+Performance Metrics Aggregation
+Performance Data Retention
+Performance Log Correlation
+Performance Bottleneck Identification
+Performance Optimization Prioritization
+Performance Impact Assessment
+Performance Testing Environments
+Performance Test Data Management
+Performance Test Automation
+Performance Baseline
+Performance Comparison
+Performance Degradation Tracking
+Performance Improvement Measurement
+Performance ROI
+Premature Optimization
+Over Logging
+Over Indexing
+Too Many Microservices
+Blocking Async Code
+Chatty APIs
+Caching Without Strategy
+Ignoring Metrics
+Synchronous Calls in Async
+Database Queries in Loops
+Over-Fetching Data
+Under-Fetching Data
+N+1 Queries
+Ignoring Connection Pool Limits
+Not Monitoring Production
+Optimizing Without Measuring
+Ignoring Query Plans
+Not Using Prepared Statements
+Ignoring Cache Hit Rates
+Not Setting Timeouts
+Ignoring Memory Leaks
+Not Profiling Production
+Over-Engineering
+Not Considering Network Latency
+Ignoring Serialization Costs
+Not Optimizing Hot Paths
+
+TAGS GENERALES (SIEMPRE INCLUIR)
+=================================
+Performance
+Optimization
+Best Practices
+Tips
+Tutorial
+Advanced
+Beginner
+High Performance
+Low Latency
+Throughput
+Scalability
+Efficiency
+Resource Management
+

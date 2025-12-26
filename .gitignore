@@ -1,0 +1,24 @@
+# Ghost Blog
+# /ghost-blog/versions
+/ghost-blog/node_modules
+# /ghost-blog/package-lock.json
+# /ghost-blog/current
+# /ghost-blog/config.*.json
+# /ghost-blog/content/data/*.db
+# /ghost-blog/content/logs/*
+# /ghost-blog/content/files/*
+# /ghost-blog/content/media/*
+# !/ghost-blog/content/logs/.gitkeep
+# !/ghost-blog/content/files/.gitkeep
+# !/ghost-blog/content/media/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
