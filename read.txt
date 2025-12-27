@@ -16,6 +16,14 @@ ghost install
 ghost doctor
 ghost status
 
+ghost setup systemd
+systemctl list-unit-files | grep ghost
+sudo systemctl enable ghost_ghost-ghost-blog
+sudo systemctl start ghost_66-179-188-92
+sudo systemctl status ghost_66-179-188-92
+ghost status
+
+
 ghost restart --force
 
 {
