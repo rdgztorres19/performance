@@ -1,0 +1,22 @@
+{
+  "name": "performance-blog",
+  "version": "1.0.0",
+  "description": "Scripts y herramientas para gestionar el blog de Performance Engineering",
+  "scripts": {
+    "insert-article": "node scripts/insert-article.js",
+    "insert": "node scripts/insert-article.js",
+    "backup-db": "./scripts/backup-db.sh"
+  },
+  "dependencies": {
+    "@tryghost/admin-api": "^1.14.3"
+  },
+  "keywords": [
+    "ghost",
+    "blog",
+    "performance",
+    "articles"
+  ],
+  "author": "",
+  "license": "MIT"
+}
+
