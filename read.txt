@@ -3,3 +3,187 @@ User ghost
 Password: ghost
 Folder: /var/www/ghost-blog
 /var/www/ghost-blog/performance/ghost-blog
+
+
+npm install -g ghost-cli@latest
+
+sudo mkdir -p /var/www/ghost-blog
+sudo chown -R $USER:$USER /var/www/ghost-blog
+sudo chmod 775 /var/www/ghost-blog
+cd /var/www/ghost-blog
+
+ghost install
+ghost doctor
+ghost status
+
+ghost restart --force
+
+{
+  "url": "https://perfstack.dev",
+  "server": {
+    "port": 2368,
+    "host": "127.0.0.1"
+  },
+  "database": {
+    "client": "mysql",
+    "connection": {
+      "host": "127.0.0.1",
+      "user": "root",
+      "password": "sbrQp10",
+      "database": "performance_enginnering_blog"
+    }
+  },
+  "mail": {
+    "transport": "SMTP",
+    "from": "support@sorba.ai",
+    "options": {
+      "host": "smtp.office365.com",
+      "port": 587,
+      "secure": false,
+      "auth": {
+        "user": "support@sorba.ai",
+        "pass": "sbrQp1012345"
+      }
+    }
+  },
+  "logging": {
+    "transports": [
+      "file",
+      "stdout"
+    ]
+  },
+  "process": "local",
+  "security": {
+    "staffDeviceVerification": true
+  },
+  "paths": {
+    "contentPath": "/var/www/ghost-blog/content"
+  }
+}
+
+
+sudo apt update
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d perfstack.dev
+sudo certbot certificates
+
+
+sudo nano /etc/nginx/sites-enabled/perfstack.dev
+
+# HTTP → HTTPS
+server {
+    listen 80;
+    server_name perfstack.dev;
+
+    return 301 https://perfstack.dev$request_uri;
+}
+
+# HTTPS → Ghost
+server {
+    listen 443 ssl http2;
+    server_name perfstack.dev;
+
+    ssl_certificate /etc/letsencrypt/live/perfstack.dev/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/perfstack.dev/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:2368;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+
+sudo systemctl reload nginx
+
+
+https://perfstack.dev
+
+Content API key
+a726bf900fe10718d68468b462
+
+Admin API key
+694f2c677f4d7d685707e3f4:a8ecd428b0cfdb67d2f797d8980736629918825e38f56c3bd14f5be0ec3d9a92
+
+https://adsense.google.com/adsense/u/0/pub-2111779448500294/sites/detail/url=perfstack.dev
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2111779448500294"
+     crossorigin="anonymous"></script>
+
+
+Or add in article
+
+<ins class="adsbygoogle"
+     style="display:block"
+     data-ad-client="ca-pub-2111779448500294"
+     data-ad-slot="1234567890"
+     data-ad-format="auto"
+     data-full-width-responsive="true"></ins>
+
+<script>
+  (adsbygoogle = window.adsbygoogle || []).push({});
+</script>
+
+-------------------
+
+SEO SETUP CHECKLIST – perfstack.dev (Ghost + Cloudflare)
+
+1) HTTPS activo y estable
+   - El sitio debe abrir solo por https://perfstack.dev
+   - El admin debe abrir en https://perfstack.dev/ghost
+   - No usar IP ni http
+
+2) Configurar SEO básico del sitio en Ghost
+   - Ir a Ghost Admin → Settings → General
+   - Definir un Title claro con keywords
+   - Definir una Description atractiva (150–160 caracteres)
+   - Definir idioma del sitio (en o es)
+
+3) Añadir el dominio a Google Search Console
+   - Crear propiedad de tipo Domain
+   - Usar el dominio exacto: perfstack.dev
+   - Elegir verificación por DNS (TXT)
+
+4) Añadir el TXT de verificación en Cloudflare
+   - Ir a Cloudflare → DNS → Add record
+   - Tipo: TXT
+   - Name: @
+   - Content: google-site-verification=XXXXXXXX
+   - TTL: Auto
+   - Guardar el registro
+
+5) Verificar dominio en Search Console
+   - Esperar entre 1 y 10 minutos
+   - Volver a Search Console
+   - Pulsar Verify
+   - Confirmar estado Verified
+
+6) Enviar sitemap del sitio
+   - En Search Console ir a Sitemaps
+   - Añadir: https://perfstack.dev/sitemap.xml
+   - Confirmar que Google lo acepta
+
+7) Configurar SEO por cada artículo
+   - En cada post abrir Settings (⚙️)
+   - Definir SEO Title (50–60 caracteres)
+   - Definir Meta Description (140–160 caracteres)
+   - Revisar URL limpia sin números ni símbolos
+
+8) Publicar contenido optimizado
+   - Publicar mínimo 3 artículos iniciales
+   - Cada artículo con 800–1500 palabras
+   - Usar headings H1, H2, H3 correctamente
+   - Enlazar artículos entre sí
+
+9) Solicitar indexación manual
+   - Ir a Search Console → URL Inspection
+   - Pegar la URL del artículo
+   - Pulsar Request Indexing
+   - Repetir para artículos importantes

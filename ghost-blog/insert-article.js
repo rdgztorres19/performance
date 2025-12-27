@@ -12,8 +12,8 @@ const path = require('path');
 const GhostAdminAPI = require('@tryghost/admin-api');
 
 // Configuración - usa variables de entorno o defaults
-const GHOST_URL = process.env.GHOST_URL || 'http://localhost:2368';
-const GHOST_ADMIN_API_KEY = process.env.GHOST_ADMIN_API_KEY || '694e153e2374c1121cd015e4:a92f5dd286ab73a128e2aa85049b08cdf98706a59ea539c245bd8dd812a06524';
+const GHOST_URL = process.env.GHOST_URL || 'https://perfstack.dev';
+const GHOST_ADMIN_API_KEY = process.env.GHOST_ADMIN_API_KEY || '694f2c677f4d7d685707e3f4:a8ecd428b0cfdb67d2f797d8980736629918825e38f56c3bd14f5be0ec3d9a92';
 
 // Inicializar Ghost Admin API
 const api = new GhostAdminAPI({
