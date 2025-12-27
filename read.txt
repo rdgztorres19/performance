@@ -131,6 +131,8 @@ Or add in article
   (adsbygoogle = window.adsbygoogle || []).push({});
 </script>
 
+https://search.google.com/search-console?resource_id=sc-domain%3Aperfstack.dev
+
 -------------------
 
 SEO SETUP CHECKLIST – perfstack.dev (Ghost + Cloudflare)
@@ -187,3 +189,7 @@ SEO SETUP CHECKLIST – perfstack.dev (Ghost + Cloudflare)
    - Pegar la URL del artículo
    - Pulsar Request Indexing
    - Repetir para artículos importantes
+
+
+Saber si tu sitio YA está indexado (método rápido)
+site:perfstack.dev

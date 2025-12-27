@@ -30,7 +30,7 @@ REMOTE_HOST="66.179.188.92"
 REMOTE_SSH_PORT="22"
 REMOTE_SSH_USER="root"
 REMOTE_SSH_PASSWORD="rY6jPCor"
-REMOTE_DB_NAME="performance_enginnering_blog"
+REMOTE_DB_NAME="blog_prod"
 REMOTE_DB_USER="root"
 
 # Archivo temporal para el dump
