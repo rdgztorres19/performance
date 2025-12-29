@@ -1,0 +1,94 @@
+Performance
+Optimization
+Hardware & Operating System
+CPU Optimization
+Memory Management
+Storage & I/O
+File I/O
+Networking
+Network Optimization
+Database Optimization
+Database Tuning
+Caching
+Cache Strategies
+Message Queues
+Event Streaming
+Search Engines
+Concurrency
+Threading
+Context Switching
+Data Structures
+Algorithms
+System Design
+Architecture
+Microservices
+Scalability
+Load Balancing
+.NET Performance
+C# Performance
+Garbage Collection
+Logging
+Observability
+Monitoring
+Profiling
+Benchmarking
+APM
+Distributed Tracing
+Media Optimization
+Content Optimization
+Image Optimization
+Video Optimization
+Compilation
+Code Generation
+Compiler Optimization
+AOT Compilation
+JIT Compilation
+Measurement
+Performance Testing
+Load Testing
+Stress Testing
+Anti-Patterns
+Latency Optimization
+Throughput Optimization
+Tail Latency
+Performance Budgets
+Linux Optimization
+Operating System Tuning
+NUMA
+SIMD
+Vectorization
+Zero-Copy
+Connection Pooling
+HTTP/2
+HTTP/3
+QUIC
+gRPC
+Indexing
+Query Optimization
+Redis
+Kafka
+Elasticsearch
+PostgreSQL
+MySQL
+MongoDB
+Cassandra
+Async/Await
+Lock-Free Programming
+Thread Pools
+Rate Limiting
+Backpressure
+CQRS
+Event Sourcing
+API Gateway
+Service Mesh
+Kubernetes
+Docker
+Container Optimization
+Nginx
+HAProxy
+Reverse Proxy
+Web Server Optimization
+Real User Monitoring
+Synthetic Monitoring
+Performance Metrics
+SLI/SLO/SLA

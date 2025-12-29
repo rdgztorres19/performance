@@ -1,0 +1,111 @@
+Prefer Fewer Fast CPU Cores Over Many Slow Ones for Latency-Sensitive Workloads
+A common misconception in performance optimization is that more CPU cores always translate to better performance.
+Cache Hierarchy: Fast cores typically feature larger, faster L1 and L2 caches per core
+They also have better prefetching logic that predicts memory access patterns.
+
+Sequential Bottlenecks (Amdahl's Law)
+Every parallel algorithm has sequential portions that cannot be parallelized
+The sequential portion becomes the bottleneck.
+
+Context Switching Overhead
+When a thread is paused, the OS must save registers, stack, and CPU state.
+Fewer instructions per second
+Context switches take longer in real time
+With many threads, context switching overhead dominates
+
+Lock / Mutex Contention
+Shared resources require locks. Only one thread can enter the critical section at a time.
+Hold locks longer (execute critical section code slowly)
+Thread queues grow quickly
+Fast cores: Enter, execute, and release locks quickly, Less waiting time for other threads
+
+Cache Misses (Critical Factor)
+Context switching evicts cache lines
+Other threads overwrite cache
+Execute fewer instructions before being preempted, Lose cache more often (context switches evict cache lines)
+Cache misses dominate execution time (each miss costs 100-300ns)
+
+Blocking I/O (Network, Disk, DB)
+Many applications are I/O-bound, not CPU-bound. Threads wait for external resources (network responses, disk reads, database queries).
+Process I/O results slowly when data arrives
+Hold buffers and locks longer while processing
+
+Common Mistakes
+Assuming More Cores Always Help: Adding cores to applications with sequential bottlenecks without profiling to identify the actual bottleneck
+Over-Parallelization: Creating excessive threads that contend for fast cores, leading to context switching overhead that negates single-thread advantages
+Mismatched Architecture Patterns: Using request-per-thread models (many threads) with fast-core architectures instead of event-driven or async models
+Cache-Unaware Algorithms: Implementing algorithms that ignore cache locality, wasting the cache advantages of fast cores
+
+---------------------------------------
+Reduce Context Switching
+A common misconception is that increasing the number of threads automatically improves performance
+Slower execution means threads stay active longer.
+Blocking behavior worsens the situation. Threads that wait for I/O or locks stop and later resume. Each stop and resume adds more switching and more coordination work.
+Longer Uninterrupted Execution Means Less Rework ()
+
+Fragmented work often requires:
+Re-checking conditions
+Re-entering code paths
+Re-establishing execution flow
+
+When execution switches to another thread, different data is accessed and the previous data becomes less immediately available.
+When the original thread resumes, accessing its data again takes longer than if it had continued running.
+
+Less Time Spent Coordinating, More Time Doing Work
+Context switches often interrupt threads that are actively making progress. These interruptions break the natural flow of execution and reduce efficiency.
+When threads are interrupted frequently, tasks take longer to complete because they are repeatedly paused and resumed.
+
+A time quantum (also called time slice) is the amount of CPU time a runnable thread is allowed to execute
+Its effective length varies depending on:
+-The operating system scheduler implementation
+-The scheduling policy in use
+-The number of runnable threads in the run queue
+-Thread priorities
+-Overall system load
+
+What Causes a Thread to Context Switch
+1. Time Quantum Expiration (Preemption)
+2. Blocking Operations (Voluntary Switching)
+3. Lock Contention (When a thread attempts to acquire a lock that is already held:)
+4. Higher-Priority Threads Becoming Runnable
+5. Thread Migration Between CPU Cores
+
+How to Reduce Context Switching
+Use Thread Pools Instead of Creating Threads
+Limit Concurrency to CPU Cores for CPU-Bound Work (If there are more CPU-bound threads than CPU cores, the operating system must constantly rotate between them, interrupting each one even while it is making progress.)
+Use Async / Non-Blocking I/O Instead of Blocking I/O (With blocking I/O, a thread starts an operation (like a network or disk call) and then stops doing anything while waiting for the result. That thread must later be restarted when the operation completes, causing additional context switches.
+-With async I/O, the thread starts the operation and immediately returns. The operating system notifies the application later when the I/O is complete, without stopping a thread just to wait.
+Minimize Lock Contention 
+-When multiple threads need the same lock, some threads must wait. Waiting threads stop running and later resume when the lock becomes available. Each wait and resume introduces context switches.
+Reduce Thread Migration Between CPU Cores
+Avoid sleep, yield, and Busy Waiting
+
+-----------------
+Threads Affinity
+the operating system is free to move threads between cores to balance load
+While this is usually beneficial, it can hurt performance for latency-sensitive or cache-sensitive workloads.
+Modern operating systems use schedulers designed to keep all CPU cores busy. To achieve this, they dynamically move processes and threads between cores to balance load
+By default, operating systems do not strictly bind threads to specific CPU cores.
+
+Instead, the scheduler uses a soft affinity strategy:
+-It prefers to run a thread on the same core it ran on last
+-But it is free to move the thread whenever it decides it is beneficial
+
+Why Threads Are Migrated
+To prevent some cores from being overloaded while others are idle
+To ensure all runnable threads get CPU time
+To spread heat and optimize energy usage
+
+Why Thread Affinity Improves Performance
+1. Preserving CPU Cache Locality
+
+When a thread migrates to another core:
+-Its data is no longer in the local cache
+-The new core must fetch data again
+-Execution stalls while data is reloaded
+
+2. Fewer Cache Misses Means Fewer CPU Stalls
+Cache misses force the CPU to wait for data. These waits add latency even if no context switch occurs.
+
+4. Reduced Context Switching Pressure
+Although affinity does not eliminate context switching, it reduces unnecessary switches caused by migration and rebalancing.

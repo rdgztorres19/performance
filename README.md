@@ -30,7 +30,7 @@ Una guía completa de técnicas y estrategias para optimizar el rendimiento de a
 
 Esta sección cubre optimizaciones a nivel de hardware y sistema operativo que pueden impactar significativamente el rendimiento de las aplicaciones.
 
-### Prefer fewer fast CPU cores over many slow ones depending on workload
+### Prefer fewer fast CPU cores over many slow ones depending on workload (OK)
 
 **Cómo funciona:**
 La elección entre muchos núcleos lentos versus pocos núcleos rápidos depende del tipo de carga de trabajo. Para aplicaciones con alta concurrencia y paralelismo (como servidores web con muchas conexiones simultáneas), más núcleos pueden ser beneficiosos. Sin embargo, para cargas de trabajo que requieren baja latencia y procesamiento secuencial rápido, núcleos más rápidos con mejor IPC (Instructions Per Cycle) son preferibles.
@@ -57,7 +57,7 @@ Puede mejorar el rendimiento single-threaded en un 20-40% dependiendo de la arqu
 
 ---
 
-### Reduce context switching
+### Reduce context switching (OK)
 
 **Cómo funciona:**
 El context switching ocurre cuando el sistema operativo cambia de un proceso/hilo a otro. Cada cambio requiere guardar el estado del proceso actual (registros, stack pointer, etc.) y restaurar el estado del nuevo proceso. Esto consume tiempo de CPU y puede invalidar cachés.
