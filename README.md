@@ -199,7 +199,7 @@ private static ThreadLocal<byte[]> localBuffer =
 
 ---
 
-### Avoid false sharing and cache line contention
+### Avoid false sharing and cache line contention (OK)
 
 **Cómo funciona:**
 False sharing ocurre cuando múltiples threads acceden a variables diferentes que están en la misma línea de caché (típicamente 64 bytes). Aunque los threads acceden a datos diferentes, comparten la misma línea de caché, causando invalidaciones constantes entre CPUs.
