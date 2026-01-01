@@ -101,7 +101,7 @@ await Task.WhenAll(Enumerable.Range(0, 1000)
 
 ---
 
-### CPU affinity and pinning
+### CPU affinity and pinning (Ok)
 
 **Cómo funciona:**
 CPU affinity permite asignar procesos o threads a núcleos específicos de CPU. Esto evita que el sistema operativo mueva el proceso entre núcleos, mejorando la localidad de caché y reduciendo migraciones de procesos.
@@ -355,7 +355,7 @@ public static unsafe void Avx2Sum(float[] array)
 
 ---
 
-### Branch prediction friendly code
+### Branch prediction friendly code (Ok)
 
 **Cómo funciona:**
 Los procesadores modernos usan branch prediction para predecir qué camino tomará un branch (if/else, loops, etc.) antes de que se evalúe la condición. Si la predicción es correcta, el pipeline continúa sin interrupciones. Si es incorrecta, hay un "branch misprediction penalty" que puede costar 10-20 ciclos de CPU.

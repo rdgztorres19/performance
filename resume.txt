@@ -148,3 +148,59 @@ Optimization: Reduce how often threads write to shared data.
 How to Avoid False Sharing in C#
 Method 1: ThreadLocal (Best for Per-Thread Data)
 Use when: Each thread needs its own accumulator, counter, or state.
+
+-------
+Branch prediction is a CPU optimization technique that guesses which path code will take at conditional statements (if/else, loops, switches) before the condition is actually evaluated.
+CPU doesn't know which path to take until it evaluates the condition, but it needs to know now to keep the pipeline full.
+CPU pipeline has stages like: fetch instruction, decode, execute, write result.
+When the CPU encounters a branch, it must wait for the condition to be evaluated before knowing which instructions to load next. This stalls the pipeline, wasting cycles. To avoid this, CPUs use branch prediction—they guess which path will be taken based on historical patterns.
+Modern CPUs are fast because of optimizations like branch prediction. When prediction fails, you still pay the penalty. In tight loops with branches, this adds up quickly.
+What is a CPU pipeline? Modern CPUs break instruction execution into stages. While one instruction is being executed, the next is being decoded, and the one after that is being fetched from memory.
+Why is the penalty so high? The pipeline is deep (10-20 stages). When a misprediction is discovered, all instructions in the wrong path must be discarded, and the pipeline must restart. The deeper the pipeline, the higher the cost.
+Impact: In tight loops with unpredictable branches, you might spend 10-20% of CPU time on misprediction penalties instead of actual computation.
+Instruction cache misses: When a branch is mispredicted, the CPU might load instructions from the wrong path into the instruction cache. When it corrects, it must load the correct instructions, potentially causing cache misses.
+Technique 1: Common Case First Principle: Put the most likely path first in if/else statements.
+Technique 2: Separate Unpredictable Branches Principle: If you have a loop with an unpredictable branch, separate the filtering from the processing.
+
+// ❌ Bad: Unpredictable branch in hot loop
+int count = 0;
+foreach (var item in items) {
+    if (item.IsValid && item.Value > threshold) {  // Unpredictable
+        Process(item);
+        count++;
+    }
+}
+
+// ✅ Good: Separate filtering (branch once per item)
+var validItems = items
+    .Where(i => i.IsValid && i.Value > threshold)
+    .ToList();  // Branch here, but only once per item
+
+foreach (var item in validItems) {  // No branches in hot loop!
+    Process(item);
+}
+
+Technique 3: Branchless Operations
+Principle: Use arithmetic operations instead of branches when possible.
+
+// ❌ Bad: Branch in hot loop
+int count = 0;
+foreach (var value in values) {
+    if (value > threshold) {
+        count++;
+    }
+}
+
+// ✅ Good: Branchless
+int count = 0;
+foreach (var value in values) {
+    count += (value > threshold) ? 1 : 0;  // No branch, just arithmetic
+}
+
+// Or using LINQ (compiler may optimize)
+int count = values.Count(v => v > threshold);
+
+Technique 4: Sort Data for Predictable Comparisons
+Principle: When comparing values in a loop, sorted data makes branches predictable.
+
+Technique 5: Use Lookup Tables Instead of Switches
