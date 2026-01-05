@@ -448,7 +448,7 @@ public static int CountGreaterThanVectorized(int[] values, int threshold)
 
 ---
 
-### Avoid busy-wait loops
+### Avoid busy-wait loops (Ok)
 
 **Cómo funciona:**
 Busy-wait loops son loops que consumen CPU constantemente mientras esperan una condición, sin ceder el control al scheduler. Esto desperdicia ciclos de CPU y puede causar problemas de rendimiento y consumo energético.
@@ -539,7 +539,7 @@ public class OptimizedWait
 
 ---
 
-### Batch processing instead of per-item execution
+### Batch processing instead of per-item execution    
 
 **Cómo funciona:**
 En lugar de procesar items uno por uno, procesar múltiples items en lotes reduce el overhead de llamadas a funciones, mejora la localidad de caché, y permite optimizaciones como vectorización.

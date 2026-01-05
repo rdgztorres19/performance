@@ -76,7 +76,7 @@ sudo certbot --nginx -d perfstack.dev
 sudo certbot certificates
 
 
-sudo nano /etc/nginx/sites-enabled/perfstack.dev
+sudo nano /etc/nginx/sites-available/perfstack.dev
 
 # HTTP → HTTPS
 server {
@@ -108,7 +108,7 @@ server {
     }
 }
 
-
+sudo ln -s /etc/nginx/sites-available/perfstack.dev /etc/nginx/sites-enabled/perfstack.dev
 sudo systemctl reload nginx
 
 

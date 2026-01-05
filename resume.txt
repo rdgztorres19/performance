@@ -204,3 +204,320 @@ Technique 4: Sort Data for Predictable Comparisons
 Principle: When comparing values in a loop, sorted data makes branches predictable.
 
 Technique 5: Use Lookup Tables Instead of Switches
+--------------
+Avoid Busy-Wait Loops: Use Proper Synchronization Primitives
+usy-wait loops continuously consume CPU cycles while waiting for a condition to become true, without yielding control to the operating system scheduler
+Porque el scheduler sí reparte tiempo… pero el busy-wait nunca se duerme. Entonces cada vez que le toca correr, corre a máxima velocidad.
+RUNNING → RUNNABLE → RUNNING
+The solution is to use proper synchronization primitives (events, semaphores, condition variables) that allow the thread to sleep until the condition is met, or use async/await for non-blocking waits.
+Yield: When a thread voluntarily gives up the CPU, allowing the scheduler to run other threads. Threads can yield explicitly or by calling blocking operations.
+Adding Thread.Sleep() to busy-wait loops Why it's better but still wrong: Reduces CPU usage but introduces unnecessary latency. The thread wakes up every millisecond to check, even if the condition changed immediately after sleeping. Still not ideal.
+
+Understanding Thread Scheduling
+What happens when a thread runs: The OS scheduler assigns a CPU core to the thread. The thread executes instructions until:
+
+It completes its work
+It yields the CPU (explicitly or by blocking)
+The scheduler preempts it (time slice expires, higher priority thread needs CPU)
+What happens during busy-wait: The thread never yields. It executes the loop instructions continuously:
+
+Event/Semaphore/Mutex: These are OS-provided synchronization mechanisms that:
+
+Allow threads to wait without consuming CPU
+Wake threads efficiently when conditions change
+Use kernel mechanisms for fast signaling
+Thread calls Wait() → OS suspends thread, doesn't consume CPU
+
+// ✅ Good: Use ManualResetEventSlim
+public class GoodWait {
+    private readonly ManualResetEventSlim _event = new ManualResetEventSlim(false);
+    
+    public void WaitForFlag() {
+        _event.Wait();  // Blocks, doesn't consume CPU
+    }
+    
+    public void SetFlag() {
+        _event.Set();  // Wakes waiting thread
+    }
+}
+
+Technique 2: Use async/await for I/O
+
+Technique 3: Use SpinWait for Very Short Waits
+When: Wait time is guaranteed to be extremely short (nanoseconds to microseconds).
+// ✅ For very short waits, use SpinWait
+public class OptimizedWait {
+    private volatile bool _flag = false;
+    
+    public void WaitForFlag() {
+        var spinWait = new SpinWait();
+        while (!_flag) {
+            spinWait.SpinOnce();  // Optimized for short waits
+            // After some spins, yields to other threads
+        }
+    }
+}
+Why it works: SpinWait uses CPU hints and gradually increases back-off. For very short waits, it avoids context switch overhead. For longer waits, it yields to prevent waste.
+
+Technique 4: Use TaskCompletionSource for Async Coordination
+When: Coordinating async operations without blocking threads
+// ✅ Good: TaskCompletionSource for async coordination
+public class AsyncWait {
+    private readonly TaskCompletionSource<bool> _tcs = new TaskCompletionSource<bool>();
+    
+    public async Task WaitForFlagAsync() {
+        await _tcs.Task;  // Non-blocking wait
+    }
+    
+    public void SetFlag() {
+        _tcs.SetResult(true);  // Completes the task
+    }
+}
+
+Technique 5: Use Producer-Consumer Patterns
+When: Threads need to wait for work items.
+// ✅ Good: Use BlockingCollection for producer-consumer
+
+public class WorkQueue {
+    private readonly BlockingCollection<WorkItem> _queue = new BlockingCollection<WorkItem>();
+    
+    // Producer
+    public void AddWork(WorkItem item) {
+        _queue.Add(item);  // Wakes waiting consumers
+    }
+    
+    // Consumer
+    public WorkItem GetWork() {
+        return _queue.Take();  // Blocks until work available
+    }
+}
+
+--------------------
+Process Data in Batches Instead of Per-Item Execution
+ This reduces function call overhead, improves CPU cache efficiency by keeping related data together, enables compiler optimizations like vectorization, and dramatically improves throughput for I/O and database operations (often 2-10x, sometimes 10-100x for I/O).
+ The trade-off is increased latency for individual items (they wait for the batch to fill), higher memory usage to hold batches
+
+The problem with per-item processing: Each item requires:
+
+A separate function call (overhead: saving registers, stack management, parameter passing)
+Separate memory access (poor cache locality)
+Separate I/O operation (network round-trips, disk seeks)
+Separate database query (connection overhead, query parsing, result handling)
+
+Function call overhead: The cost of invoking a function: saving CPU registers, managing the call stack, passing parameters, and jumping to the function code. Modern CPUs minimize this, but it's still measurable, especially when called millions of times.
+
+Cache locality: The principle that accessing data that's close together in memory is faster. CPUs cache memory in blocks (cache lines), so accessing nearby data means it's likely already in cache.
+
+Vectorization: A CPU optimization where the processor performs the same operation on multiple data items simultaneously using SIMD (Single Instruction, Multiple Data) instructions. Instead of processing items one by one, the CPU processes 4, 8, or 16 items at once.
+
+Function Call Overhead Reduction
+With batching: Instead of 1000 function calls for 1000 items, you make 1 function call with 1000 items. The overhead is paid once, not 1000 times.
+
+What is vectorization? Modern CPUs can perform the same operation on multiple data items simultaneously using SIMD instructions. For example, adding 8 integers at once instead of 8 separate additions.
+Batch processing: When processing arrays/lists in batches, compilers can see patterns:
+Same operation on multiple items
+Sequential access
+No dependencies between items
+This enables automatic vectorization by the compiler.
+
+I/O Operation Batching
+Network I/O overhead: Each network operation has overhead:
+Network round-trip time (latency)
+Protocol overhead (headers, acknowledgments)
+Connection management
+
+Per-item I/O: 1000 items = 1000 network round-trips. Even if each round-trip is fast (1ms), total time is 1000ms (1 second) just for network overhead.
+
+Batch I/O: 1000 items in 10 batches = 10 network round-trips. Total time: 10ms. 100x improvement just from reducing round-trips.
+
+I/O Overhead Dominance
+The problem: For I/O-bound operations (database, network, file), the overhead of each I/O operation dominates. Network round-trips, database query overhead, and disk seeks are much slower than the actual data processing.
+
+Synchronization Overhead
+The problem: In multi-threaded per-item processing, threads must coordinate frequently (synchronize). Each synchronization has overhead (acquiring locks, checking conditions).
+Example: 1000 threads processing 1 item each. Each thread might need to:
+Acquire a lock (overhead)
+Update shared state (overhead)
+Release lock (overhead)
+Total synchronization overhead might be 50% of total time.
+
+OS / I/O syscalls
+(user → kernel transitions)
+❌ Single-item I/O
+foreach (var line in lines)
+{
+    File.AppendAllText("data.log", line + "\n");
+}
+
+What happens internally
+Each iteration:
+open()
+write()
+close()
+
+One syscall per item
+User → kernel → user context switch every time
+File system metadata touched repeatedly
+
+✅ Batched I/O
+var sb = new StringBuilder();
+
+foreach (var line in lines)
+{
+    sb.AppendLine(line);
+}
+
+File.AppendAllText("data.log", sb.ToString());
+
+What improves
+Single write() syscall
+Kernel page cache used efficiently
+Minimal context switches
+
+++++
+2️⃣ Function call overhead
+❌ Single-item function calls
+foreach (var x in data)
+{
+    ProcessItem(x);
+}
+
+void ProcessItem(int x)
+{
+    result += x * 2;
+}
+
+What happens
+Method prologue/epilogue per item
+Stack setup/teardown
+Poor instruction cache locality
+🔴 High call overhead relative to useful work
+
+✅ Batched function call
+ProcessBatch(data);
+
+void ProcessBatch(int[] batch)
+{
+    for (int i = 0; i < batch.Length; i++)
+    {
+        result += batch[i] * 2;
+    }
+}
+
+++++
+3️⃣ Cache locality (L1 / L2)
+Dont use linkect List use arrays
+
+What improves
+Sequential memory access
+Cache line prefetching
+Very low cache miss rate
+
++++
+4️⃣ Synchronization / lock overhead
+❌ Lock per item
+
+foreach (var x in data)
+{
+    lock (_lock)
+    {
+        shared += x;
+    }
+}
+
+What happens
+Lock acquire/release per iteration
+Cache line bouncing between cores
+Potential thread contention
+
+✅ Lock once per batch
+int local = 0;
+
+foreach (var x in data)
+{
+    local += x;
+}
+
+lock (_lock)
+{
+    shared += local;
+}
+
++++
+5️⃣ Vectorization (SIMD)
+❌ Scalar, per-item math
+for (int i = 0; i < a.Length; i++)
+{
+    c[i] = a[i] + b[i];
+}
+
+What happens
+One add per iteration
+CPU uses scalar ALU
+SIMD units idle
+🔴 Wasted hardware capability
+
+✅ Batched SIMD via System.Numerics
+using System.Numerics;
+
+int i = 0;
+for (; i <= a.Length - Vector<int>.Count; i += Vector<int>.Count)
+{
+    var va = new Vector<int>(a, i);
+    var vb = new Vector<int>(b, i);
+    (va + vb).CopyTo(c, i);
+}
+
+for (; i < a.Length; i++)
+{
+    c[i] = a[i] + b[i];
+}
+
+What improves
+4–16 elements
+SIMD units fully utilized
+🟢 True data-parallel execution
+
+++++
+6️⃣ Allocation / GC pressure
+❌ Allocate per item
+foreach (var x in data)
+{
+    var obj = new TempObject(x);
+    Process(obj);
+}
+
+What happens
+Thousands of allocations
+GC Gen0 pressure
+GC pauses
+🔴 GC becomes bottleneck
+
+✅ Batched reuse
+var buffer = new TempObject[data.Length];
+
+for (int i = 0; i < data.Length; i++)
+{
+    buffer[i] = new TempObject(data[i]);
+}
+
+ProcessBatch(buffer);
+What improves
+Fewer allocations
+Predictable memory layout
+Lower GC frequency
+🟢 Stable memory behavior
++++++
+7️⃣ Real OS-visible example (network I/O)
+❌ Single send
+foreach (var msg in messages)
+{
+    socket.Send(msg);
+}
+Internals
+Syscall per send
+TCP overhead per packet
+
+✅ Batched send
+var buffers = messages.Select(m => new ArraySegment<byte>(m)).ToList();
+socket.Send(buffers);
