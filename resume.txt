@@ -521,3 +521,130 @@ TCP overhead per packet
 ✅ Batched send
 var buffers = messages.Select(m => new ArraySegment<byte>(m)).ToList();
 socket.Send(buffers);
+-------------------
+Avoid Page Faults: Keep Working Set in Physical Memory
+
+Page faults occur when the CPU accesses memory that isn't currently mapped in physical RAM, requiring the operating system to load the page from disk (swap) or allocate/map it.
+Each page fault can cost thousands of CPU cycles (10,000-100,000+ cycles) and disk I/O latency (milliseconds)
+What is a page fault? A page fault is an interrupt that occurs when a program accesses a virtual memory address that isn't currently mapped to physical RAM. The CPU triggers an exception, and the operating system must handle it by either loading the page from disk (swap) or allocating/mapping memory.
+
+Virtual memory: An abstraction where programs see a large, continuous address space (virtual addresses) that the operating system maps to physical RAM. Virtual memory allows programs to use more memory than physically available by swapping unused pages to disk.
+Page: A fixed-size block of memory (typically 4KB on x86-64, 16KB on some ARM systems). Virtual memory is divided into pages that can be independently mapped to physical memory or disk.
+Page table: A data structure maintained by the OS that maps virtual addresses to physical addresses. The CPU's Memory Management Unit (MMU) uses page tables to translate virtual addresses.
+Swap / Page file: Disk space used as virtual memory extension. When physical RAM is full, the OS moves less-used pages to swap, freeing RAM for active pages. Loading from swap is slow (disk I/O).
+
+Types of Page Faults
+Minor page fault:
+Page exists in physical memory but isn't mapped in the page table
+Common causes: Copy-on-write, shared memory mapping
+Cost: 1,000-10,000 CPU cycles (just updating page table)
+Impact: Moderate—slower than normal access but not catastrophic
+
+Para qué se necesita que esté mapeado?
+Porque la CPU solo sabe leer y escribir en direcciones físicas de RAM, pero los programas trabajan con direcciones virtuales.
+
+
+Major page fault:
+Page must be loaded from disk (swap or file)
+Cost: 10,000-100,000+ CPU cycles + disk I/O latency (5-10ms for disk, <1ms for SSD)
+Impact: Severe—can block execution for milliseconds
+A major page fault is 50,000-100,000x slower than normal memory access!
+
+How virtual memory works:
+Program uses virtual addresses (e.g., 0x1000, 0x2000)
+CPU's MMU translates virtual address to physical address using page tables
+If page is mapped: Access proceeds normally (fast)
+If page is not mapped: Page fault occurs (slow)
+
+Memory allocation process:
+Program requests memory (e.g., new byte[1MB])
+OS reserves virtual address space (fast, just bookkeeping)
+OS doesn't immediately allocate physical RAM (lazy allocation)
+When program first accesses memory: Page fault occurs
+OS allocates physical page and maps it
+
+Why lazy allocation: OS defers physical allocation until first access to avoid wasting RAM on unused allocations. But this means first access triggers a page fault.
+
+Copy-on-write (COW):
+When memory is shared (fork, shared memory), OS uses copy-on-write
+Initially, pages are shared (read-only in page table)
+On write: Page fault occurs, OS copies page, updates page table
+Creates minor page faults on first write to shared pages
+
+Swap operation:
+OS identifies pages to swap out (least recently used algorithm)
+If page is dirty (modified), write to swap
+Mark page as swapped in page table
+Free physical RAM for new pages
+
+CPU Pipeline Stalls
+The problem: Page faults cause CPU pipeline stalls. The CPU must wait for memory access to complete before continuing execution.
+What is a pipeline stall? Modern CPUs execute multiple instructions simultaneously in a pipeline. When an instruction needs data that isn't available (waiting for page fault), the pipeline stalls—no progress until data arrives.
+
+Context Switch Overhead
+The problem: Page faults trigger context switches to kernel mode. The OS page fault handler runs, which has overhead (saving/restoring registers, kernel processing).
+
+Disk I/O Contention
+The problem: When multiple processes have page faults, they compete for disk I/O bandwidth. Disk I/O becomes a bottleneck.
+
+Memory Bandwidth Saturation
+The problem: Frequent page faults can saturate memory bandwidth. Loading pages from swap competes with normal memory access
+
+Technique 1: Pre-load Data into Memory
+When: You have large data structures that will be accessed soon. Pre-loading ensures pages are in physical RAM before access
+
+private byte[] _largeArray;
+    
+    public GoodMemoryAccess()
+    {
+        _largeArray = new byte[100_000_000];
+        // Pre-load all pages by touching each page
+        const int pageSize = 4096; // 4KB page size
+        for (int i = 0; i < _largeArray.Length; i += pageSize)
+        {
+            _largeArray[i] = 0; // Touch each page to trigger allocation
+        }
+    }
+
+Why it works: Touching each page (accessing at least one byte) triggers page allocation. OS allocates physical pages and maps them, eliminating page faults during actual access.
++++++++
+
+Technique 2: Memory Locking (mlock / VirtualLock)
+When: You have critical data that must never be swapped to disk. Locking prevents OS from swapping pages.
+Why it works: Memory locking tells the OS never to swap these pages to disk. They remain in physical RAM, guaranteeing no page faults from swap.
+
+Technique 3: Sequential Memory Access
+When: Processing large datasets. Sequential access improves prefetching and reduces page faults.
+Sequential access reduces page faults because the OS and CPU can predict what you will need next and load/map it before you touch it.
+
+Technique 5: Working Set Management
+When: Your working set might exceed available RAM. Manage what stays in memory.
+// ✅ Good: Keep hot data in memory, swap cold data explicitly
+public class WorkingSetManager<T>
+{
+    private readonly Dictionary<string, T> _hotCache = new(); // Hot data
+    private readonly Dictionary<string, T> _coldData = new(); // Cold data (can be swapped)
+    
+    public T GetData(string key)
+    {
+        // Hot data is always in memory
+        if (_hotCache.TryGetValue(key, out var value))
+        {
+            return value;
+        }
+        
+        // Cold data loaded on demand (may cause page fault, but acceptable)
+        return LoadColdData(key);
+    }
+    
+    public void PromoteToHot(string key, T data)
+    {
+        // Move to hot cache (ensure it's in memory)
+        _hotCache[key] = data;
+        // Pre-load to ensure in physical RAM
+        EnsureInMemory(data);
+    }
+}
+Why it works: By explicitly managing what's hot (frequently accessed) vs. cold (rarely accessed), you ensure hot data stays in RAM while allowing cold data to be swapped.
+Performance: Keeps frequently accessed data in RAM, avoiding page faults on hot paths while allowing OS to manage cold data.
+

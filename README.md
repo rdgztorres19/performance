@@ -539,7 +539,7 @@ public class OptimizedWait
 
 ---
 
-### Batch processing instead of per-item execution    
+### Batch processing instead of per-item execution (Ok)   
 
 **Cómo funciona:**
 En lugar de procesar items uno por uno, procesar múltiples items en lotes reduce el overhead de llamadas a funciones, mejora la localidad de caché, y permite optimizaciones como vectorización.
@@ -618,7 +618,7 @@ public async Task InsertItemsBatch(List<Item> items)
 
 ---
 
-### Avoid CPU throttling
+### Avoid CPU throttling (Ok)
 
 **Cómo funciona:**
 CPU throttling ocurre cuando el sistema reduce la frecuencia del CPU debido a temperatura alta, restricciones de energía, o políticas del sistema. Esto reduce el rendimiento significativamente.
@@ -951,7 +951,7 @@ Puede mejorar la predecibilidad del rendimiento en un 20-40% en sistemas multi-t
 
 La gestión eficiente de memoria es crítica para el rendimiento de aplicaciones .NET. Esta sección cubre técnicas para optimizar el uso de memoria, reducir allocations, y mejorar la localidad de datos.
 
-### Avoid page faults
+### Avoid page faults (Ok)
 
 **Cómo funciona:**
 Los page faults ocurren cuando el sistema necesita cargar una página de memoria desde el disco (swap) o cuando se accede a memoria que no está mapeada. Cada page fault puede costar miles de ciclos de CPU y acceso a disco, causando latencia significativa.
