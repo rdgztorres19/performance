@@ -1406,7 +1406,7 @@ public void ProcessLargeFile(string filePath)
 
 ---
 
-### Stack allocation when possible
+### Stack allocation when possible (Ok)
 
 **Cómo funciona:**
 Las variables locales en el stack se asignan y liberan automáticamente cuando la función retorna, sin overhead del garbage collector. Esto es mucho más rápido que heap allocation.
