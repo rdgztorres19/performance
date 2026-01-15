@@ -876,3 +876,118 @@ public string BuildMessage(string[] parts)
         _pool.Return(sb);
     }
 }
+-----------------------------------
+Use Stack Allocation for Small Temporary Buffers
+Allocate small temporary arrays and buffers on the stack instead of the heap to avoid garbage collection overhead, improve performance, and reduce memory allocations in hot paths.
+Stack-allocated memory is automatically freed when the function returns (no GC needed), making it ideal for small temporary arrays (< 1KB typically
+The trade-off is limited size (typically 1-8MB per thread), stack-only lifetime (can't return stack-allocated buffers from functions), and requires using Span<T> for type safety.
+What is the stack? The stack is a region of memory that stores local variables and function call information.
+When you call a function, its local variables are "pushed" onto the stack. When the function returns, those variables are automatically "popped" off.
+The stack is managed automatically by the runtime—you don't need to free memory manually.
+What is the heap? The heap is a larger region of memory where objects live longer. 
+The heap is managed by the garbage collector (GC), which automatically finds and frees memory that's no longer used. 
+
+The problem with heap allocation for small temporary buffers: When you allocate small arrays or buffers on the heap (like new byte[100]), you're asking the garbage collector to:
+Find available memory
+Allocate the object
+Track the object for garbage collection
+Later, when the object is no longer used, the GC must identify it as garbage and free it
+For small temporary buffers that only exist during a function call, this is wasteful
+
+Why this matters: Garbage collection isn't free. The GC must:
+Stop your application (in some GC modes) to collect garbage
+Scan memory to find unused objects
+Move objects around (in compacting GC)
+
+What is stackalloc? A C# keyword that allocates memory on the stack instead of the heap.
+What is a hot path? Code that executes frequently—like code inside loops, frequently called functions, or performance-critical sections. Optimizing hot paths provides the biggest performance gains.
+What is GC pressure? The amount of work the garbage collector must do. More allocations = more GC pressure = more frequent GC pauses = worse performance.
+What is stack overflow? When the stack runs out of space (typically 1-8MB per thread). This crashes your program. Stack overflow happens when you allocate too much on the stack, have deep recursion, or use very large stack-allocated buffers.
+
+How heap allocation works (traditional new):
+Runtime searches for available memory in the heap
+Allocates memory for the object
+Initializes the object (calls constructor if applicable)
+Registers the object with the garbage collector
+Returns a reference to the object
+Later, when the object is no longer referenced, the GC identifies it as garbage
+GC frees the memory (may require pausing the application)
+
+How stack allocation works (stackalloc):
+Compiler/runtime adjusts the stack pointer (just moves a pointer—very fast!)
+Memory is immediately available (no search, no GC registration)
+Object is used during the function
+When the function returns, stack pointer moves back (memory is automatically freed—no GC needed!)
+For small temporary buffers, stack allocation is much faster.
+
+Cache efficiency: Stack memory is accessed frequently, stays in CPU cache
+Thread-local: Each thread has its own stack, can't share stack memory between threads
+
+Faster allocation: Stack allocation is just moving a pointer (1-5 CPU cycles), compared to heap allocation (100-500 CPU cycles). This is 20-100x faster for allocation.
+Better cache performance: Stack memory has excellent cache locality. Stack-allocated buffers are more likely to be in CPU cache, reducing cache misses and improving performance.
+Reduced memory fragmentation: Stack allocation doesn't fragment memory (unlike heap allocation, which can cause fragmentation over time)
+
+String formatting/building: When building small strings (using stackalloc char[] with Span<char>). Avoids heap allocations for temporary string buffers
+Allocating too much on the stack: Using stackalloc with large sizes (e.g., stackalloc byte[100_000]). This causes stack overflow. Keep allocations small (< 1KB typically).
+Returning stack-allocated memory: Trying to return a Span<T> created with stackalloc from a function. Stack memory is invalid after the function returns—this causes crashes.
+Using stackalloc in recursive functions: Allocating on the stack in recursive functions. Each recursive call uses stack space—combining recursion with stack allocation can easily cause stack overflow.
+
+Technique 1: Replace Small Heap Allocations with stackalloc
+
+// ❌ Heap allocation for temporary buffer
+public void ProcessData(byte[] data)
+{
+    var buffer = new byte[256]; // Heap allocation
+    // Use buffer
+    ProcessBuffer(data, buffer);
+    // Buffer becomes garbage, GC must collect it
+}
+
+// ✅ Stack allocation for temporary buffer
+public void ProcessData(byte[] data)
+{
+    Span<byte> buffer = stackalloc byte[256]; // Stack allocation
+    // Use buffer
+    ProcessBuffer(data, buffer);
+    // Buffer automatically freed when function returns (no GC!)
+}
+
+++++++
+Technique 2: String Formatting with stackalloc
+When: Building small strings frequently (formatting numbers, creating small text).
+
+// ❌ Heap allocation for string building
+public string FormatValue(int value)
+{
+    var buffer = new char[32]; // Heap allocation
+    if (value.TryFormat(buffer, out int written))
+    {
+        return new string(buffer, 0, written); // Another allocation
+    }
+    return value.ToString();
+}
+
+// ✅ Stack allocation for string building
+public string FormatValue(int value)
+{
+    Span<char> buffer = stackalloc char[32]; // Stack allocation
+    if (value.TryFormat(buffer, out int written))
+    {
+        return new string(buffer.Slice(0, written)); // Only one allocation (the string)
+    }
+    return value.ToString();
+}
+
+---------------
+Use Zero-Copy Patterns
+Stop copying data unnecessarily. Instead of duplicating information in memory, share references to the same data. This saves CPU time, memory, and makes your programs faster.
+
+What does "copying data" mean? Data copying involves reading bytes from a source memory address and writing them to a destination memory address. This operation consumes CPU cycles for memory read/write operations and utilizes memory bandwidth for data transfer. Each copy operation requires:
+Memory read operation: CPU fetches data from source address via memory bus
+Memory write operation: CPU stores data to destination address via memory bus
+Cache invalidation: Potential cache misses and cache line updates
+Memory bandwidth consumption: Double bandwidth usage (read + write)
+
+What is a buffer? A buffer is a contiguous block of memory allocated to temporarily store data during I/O operations or inter-process communication. Buffers serve as intermediate storage between data producers and consumers, allowing for efficient batch processing and reducing the frequency of system calls.
+When performing file I/O, the operating system reads data from storage devices in chunks (typically 4KB-64KB blocks) into kernel buffers, which are then copied to user-space application buffers for processing.
+

@@ -1116,7 +1116,7 @@ public class BestMemoryUsage
 
 ---
 
-### Use memory pooling
+### Use memory pooling (Ok)
 
 **Cómo funciona:**
 Memory pooling reutiliza bloques de memoria pre-asignados en lugar de asignar y liberar memoria constantemente. Esto reduce la presión sobre el garbage collector y mejora el rendimiento.
@@ -1306,7 +1306,7 @@ public class BestBufferReuse
 
 ---
 
-### Zero-copy patterns
+### Zero-copy patterns (Ok)
 
 **Cómo funciona:**
 Zero-copy evita copiar datos entre buffers en memoria, reduciendo el uso de CPU y memoria. En lugar de copiar datos, se pasan referencias o se usan técnicas del sistema operativo como sendfile().
