@@ -1480,7 +1480,7 @@ public string FormatNumber(int value)
 
 ---
 
-### Avoid heap fragmentation
+### Avoid heap fragmentation (Ok)
 
 **Cómo funciona:**
 Heap fragmentation ocurre cuando hay muchos objetos pequeños entre objetos grandes, dejando espacios libres que son demasiado pequeños para usar. Esto puede causar que el GC tenga que compactar más frecuentemente o que las allocations fallen.
