@@ -1719,7 +1719,7 @@ public unsafe void ProcessAlignedArray(float[] data)
 
 ---
 
-### Memory prefetching
+### Memory prefetching (ok)
 
 **Cómo funciona:**
 Memory prefetching carga datos en caché antes de que se necesiten, reduciendo la latencia de acceso a memoria. Esto puede ser hecho por el hardware (prefetchers automáticos) o explícitamente por el software.
