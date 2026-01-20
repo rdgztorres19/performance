@@ -2375,3 +2375,500 @@ public void ProcessSortedData(int[] data)
 **Performance**: 10-20% improvement when sequential processing benefits outweigh sorting cost. Use when processing multiple times or when sorting is cheap relative to processing.
 
 ---
+## Use Cache-Friendly Memory Layouts to Improve Performance
+
+**Organize data in memory so that data accessed together is stored together, improving cache locality, reducing cache misses.**
+
+Cache-friendly memory layouts organize data in memory so that data accessed together is stored nearby, keeping related data in the same cache lines. This improves cache locality, reduces cache misses, and improves performance by 20-50% in memory-intensive code.
+
+The trade-off is potentially more complex code—you may need to restructure data layouts or use different data organization patterns. Use cache-friendly layouts in hot paths with frequent memory access.
+
+### Problem Context
+
+**The problem with poor memory layouts**: When data accessed together is scattered in memory, accessing one piece of data loads a cache line, but the related data isn't in that cache line. The CPU must load multiple cache lines to get all the needed data, causing cache misses and slowing down your program.
+
+### Key Terms Explained
+
+**What is a cache line?** Memory is loaded into cache in fixed-size blocks called cache lines (typically 64 bytes on modern CPUs). When you access one byte, the entire cache line (64 bytes) is loaded. This is why accessing nearby data is fast—it's already in the same cache line.
+
+**What is spatial locality?** The principle that if you access a memory location, you'll likely access nearby locations soon. Organizing data to have good spatial locality improves cache performance.
+
+**What is cache locality?** How well your data access patterns utilize cache. Good cache locality means data accessed together is stored together, so it's in the same cache line.
+
+**What is a cache miss?** When your program requests data that isn't in the CPU cache, that's a cache miss. The CPU must load the data from main memory, which takes 100-300 CPU cycles.
+
+**What is Array of Structs (AoS)?** Storing an array of complete structs together. For example: `Item[] items` where each `Item` contains `Id`, `Name`, `Value`, etc. Good when accessing multiple fields together.
+
+**What is Struct of Arrays (SoA)?** Storing each field in a separate array. For example: `int[] ids`, `string[] names`, `double[] values`. Good when iterating over a single field.
+
+**What is cache alignment?** Ensuring data structures start at addresses that are multiples of cache line size (64 bytes). Aligned data loads more efficiently into cache.
+
+**What is padding?** Extra bytes added by the compiler/runtime to align fields within structs. Padding ensures fields start at aligned addresses but wastes memory.
+
+### Understanding Cache Lines and Spatial Locality
+
+**How cache lines work**:
+1. When you access a memory location, the CPU loads the entire cache line (64 bytes) into cache
+2. The cache line contains the accessed location plus nearby locations
+3. Accessing nearby locations is fast—they're already in cache
+4. Accessing distant locations requires loading a different cache line (cache miss)
+
+**Why spatial locality matters**: If you access location 1000, locations 1001-1063 are in the same cache line. Accessing these nearby locations is fast (cache hit). Accessing location 2000 requires loading a different cache line (cache miss).
+
+### Understanding Array of Structs (AoS) vs Struct of Arrays (SoA)
+
+**Array of Structs (AoS)**:
+- Stores complete structs together: `Item[] items` where each `Item` is `{Id, Name, Value, Created}`
+- Good when: Accessing multiple fields together (e.g., `item.Id` and `item.Value` together)
+- Cache behavior: Accessing one field loads the entire struct (all fields) into cache
+- Example: Game entities where you access position, velocity, and color together
+
+**Struct of Arrays (SoA)**:
+- Stores each field in a separate array: `int[] ids`, `string[] names`, `double[] values`
+- Good when: Iterating over a single field (e.g., summing all IDs)
+- Cache behavior: Accessing one field loads only that field's data into cache
+- Example: Processing large datasets where you only need one column
+
+**Why SoA is better for single-field iteration**: When iterating over IDs in AoS, each cache line loads complete structs (ID, Name, Value, Created), but you only use ID. This wastes cache space on unused fields. With SoA, each cache line loads only IDs, maximizing cache efficiency.
+
+**Why AoS is better for multiple fields**: When accessing `item.Id` and `item.Value` together in AoS, both fields are in the same struct, so they're likely in the same cache line. With SoA, `ids[i]` and `values[i]` are in different arrays, so they're likely in different cache lines—two cache loads instead of one!
+
+### Understanding Cache Line Alignment
+
+**Cache line alignment**: Ensuring data structures align to cache line boundaries (multiples of 64 bytes). Aligned data loads more efficiently into cache.
+
+**Why alignment matters**: Unaligned data structures can span multiple cache lines. Accessing one field may load two cache lines instead of one, wasting cache bandwidth.
+
+**Example**: A struct starting at byte 60 (not cache-aligned) may span bytes 60-123, requiring two cache lines (bytes 0-63 and 64-127). If aligned to byte 64, it fits in one cache line (bytes 64-127).
+
+**Padding and alignment**: The compiler adds padding to align fields within structs. For example, a `byte` followed by an `int` may add 3 bytes of padding to align the `int` to 4-byte boundary.
+
+### Why This Becomes a Bottleneck
+
+#### Cache Miss Latency
+
+**The problem**: When data accessed together is scattered in memory, accessing one piece requires loading a cache line, but related data isn't in that cache line. The CPU must load multiple cache lines, causing cache misses.
+
+#### Memory Bandwidth Waste
+
+**The problem**: Poor memory layouts waste memory bandwidth by loading unused data. When iterating over IDs in AoS, each cache line loads complete structs (ID, Name, Value, Created), but only ID is used. This wastes bandwidth on unused fields.
+
+#### Cache Pollution
+
+**The problem**: Poor memory layouts cause cache pollution by loading unused data into cache. This unused data evicts useful data, causing cache misses later.
+
+### When to Use This Approach
+
+- **Hot paths with frequent memory access**: Code paths that access memory frequently (identified by profiling). Optimizing layouts in hot paths provides the biggest gains.
+- **Memory-intensive applications**: Applications that process large amounts of data. Cache-friendly layouts improve cache efficiency, directly impacting performance.
+
+### Optimization Techniques
+
+#### Technique 1: Use Array of Structs (AoS) for Multiple Fields
+
+**When**: You frequently access multiple fields together.
+
+**The problem**:
+```csharp
+// ❌ Struct of Arrays - multiple cache loads
+public class BadMultipleFieldAccess
+{
+    private int[] _ids = new int[1000];
+    private double[] _values = new double[1000];
+    
+    public double SumIdValue()
+    {
+        double sum = 0;
+        for (int i = 0; i < _ids.Length; i++)
+        {
+            sum += _ids[i] + _values[i]; // Two cache loads (ids and values)
+        }
+        return sum;
+    }
+}
+```
+
+**Problems**:
+- Accessing IDs and values requires two separate arrays
+- Each access may require a different cache line
+- Multiple cache loads for related data
+- Poor spatial locality
+
+**The solution**:
+```csharp
+// ✅ Array of Structs - single cache load
+public struct Item
+{
+    public int Id;
+    public double Value;
+}
+
+public class GoodMultipleFieldAccess
+{
+    private Item[] _items = new Item[1000];
+    
+    public double SumIdValue()
+    {
+        double sum = 0;
+        foreach (var item in _items)
+        {
+            sum += item.Id + item.Value; // Both fields in same struct, same cache line likely
+        }
+        return sum;
+    }
+}
+```
+
+**Why it works**: AoS stores both fields together in the same struct. When you access `item.Id` and `item.Value`, they're likely in the same cache line. One cache load gets both fields.
+
+**Performance**: 20-40% improvement when accessing multiple fields together. Fewer cache loads and better spatial locality.
+
+#### Technique 2: Use Struct of Arrays (SoA) for Single Field Iteration
+
+**When**: You frequently iterate over only one field.
+
+**The problem**:
+```csharp
+// ❌ Array of Structs - loads unused fields
+public struct Item
+{
+    public int Id;
+    public string Name;      // Referencia, puede estar lejos
+    public DateTime Created;
+    public double Value;
+}
+
+public class BadSingleFieldIteration
+{
+    private Item[] _items = new Item[1000];
+    
+    public int SumIds()
+    {
+        int sum = 0;
+        foreach (var item in _items)
+        {
+            sum += item.Id; // Loads entire struct (Id, Name, Created, Value) but only uses Id
+        }
+        return sum;
+    }
+}
+```
+
+**Problems**:
+- Iterating over only IDs loads complete structs
+- Each struct contains Name, Created, Value (unused)
+- Wastes cache space on unused fields
+- Wastes memory bandwidth on unused data
+
+**The solution**:
+```csharp
+// ✅ Struct of Arrays - only loads needed field
+public class GoodSingleFieldIteration
+{
+    private int[] _ids = new int[1000];
+    private string[] _names = new string[1000];
+    private DateTime[] _created = new DateTime[1000];
+    private double[] _values = new double[1000];
+    
+    public int SumIds()
+    {
+        int sum = 0;
+        foreach (var id in _ids) // Only loads IDs, no unused data
+        {
+            sum += id;
+        }
+        return sum;
+    }
+}
+```
+
+**Why it works**: SoA stores each field in a separate array. Iterating over IDs loads only ID data into cache. No unused fields are loaded, maximizing cache efficiency.
+
+**Performance**: 30-100% improvement when iterating over single fields. Dramatically better cache utilization and bandwidth efficiency.
+
+#### Technique 3: Compact Frequently Accessed Data
+
+**When**: You have structs with fields of different access frequencies.
+
+**The problem**:
+```csharp
+// ❌ Mixed access frequency, poor layout
+public struct Item
+{
+    public string Name;      // Rarely accessed
+    public int Id;           // Frequently accessed
+    public double Value;     // Frequently accessed
+    public DateTime Created; // Rarely accessed
+}
+
+public class BadCompactness
+{
+    private Item[] _items = new Item[1000];
+    
+    public double SumIdValue()
+    {
+        double sum = 0;
+        foreach (var item in _items)
+        {
+            sum += item.Id + item.Value; // Frequently accessed
+            // Name and Created are loaded but rarely used
+        }
+        return sum;
+    }
+}
+```
+
+**Problems**:
+- Frequently accessed fields (Id, Value) mixed with rarely accessed fields (Name, Created)
+- Accessing Id and Value loads Name and Created (unused)
+- Wastes cache space on rarely accessed fields
+- Struct is larger than necessary
+
+**The solution**:
+```csharp
+// ✅ Compact frequently accessed fields together
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct CacheFriendlyItem
+{
+    // Frequently accessed fields first, compacted
+    public int Id;           // 4 bytes
+    public double Value;     // 8 bytes
+    // Total: 12 bytes (fits in same cache line with padding)
+    
+    // Rarely accessed fields separate (or in separate array)
+    public string Name;      // Reference, accessed less frequently
+    public DateTime Created; // 8 bytes, accessed less frequently
+}
+
+public class GoodCompactness
+{
+    private CacheFriendlyItem[] _items = new CacheFriendlyItem[1000];
+    
+    public double SumIdValue()
+    {
+        double sum = 0;
+        foreach (var item in _items)
+        {
+            sum += item.Id + item.Value; // Both in first 12 bytes, same cache line
+            // Name and Created not loaded if not accessed
+        }
+        return sum;
+    }
+}
+```
+
+**Why it works**: Compacting frequently accessed fields together ensures they fit in the same cache line. Using `Pack = 1` eliminates padding, making the struct smaller. Rarely accessed fields can be stored separately or accessed less frequently.
+
+**Performance**: 15-30% improvement by reducing cache line loads and improving spatial locality.
+
+#### Technique 4: Align Data to Cache Line Boundaries
+
+**When**: You have critical data structures that are accessed frequently.
+
+**Understanding C# Struct Layout Attributes (Start Here!)**
+
+Before diving into the examples, let's understand the C# attributes that control memory layout:
+
+- **What is `[StructLayout]`?** This attribute tells the C# compiler how to arrange fields in memory. By default, C# arranges fields automatically, but you can control it explicitly for performance.
+
+- **What is `LayoutKind.Sequential`?** This tells the compiler to place fields in the order you declare them, one after another in memory. Fields are placed sequentially (first field at offset 0, second field after the first, etc.).
+
+- **What is `Pack`?** This controls the alignment boundary. `Pack = 8` means fields are aligned to 8-byte boundaries. For example, a `long` (8 bytes) must start at an address that's a multiple of 8 (0, 8, 16, 24...). This prevents fields from being misaligned.
+
+- **What is `LayoutKind.Explicit`?** This gives you complete control—you specify the exact byte offset for each field using `[FieldOffset]`. The compiler doesn't arrange fields automatically; you control everything.
+
+- **What is `[FieldOffset]`?** This attribute specifies the exact byte position where a field starts in memory. For example, `[FieldOffset(0)]` means the field starts at byte 0, `[FieldOffset(8)]` means it starts at byte 8.
+
+- **What is `Size`?** This sets the total size of the struct in bytes. `Size = 64` means the struct is exactly 64 bytes (one cache line). The compiler adds padding to reach this size.
+
+**Why these matter**: By controlling field placement, you can ensure fields align to cache line boundaries, preventing fields from spanning multiple cache lines and improving cache efficiency.
+
+**The problem**:
+```csharp
+// ❌ Unaligned struct may span multiple cache lines
+public struct Item
+{
+    public byte B;      // 1 byte at offset 0
+    public long L;      // 8 bytes at offset 1 (misaligned!)
+    public int I;       // 4 bytes at offset 9
+}
+
+// What happens in memory:
+// Offset 0:  B (1 byte)
+// Offset 1:  L starts here (but long should be at offset 0, 8, 16...)
+//            This means L spans bytes 1-8, which is MISALIGNED
+// Offset 9:  I (4 bytes)
+// 
+// If this struct starts at memory address 1000:
+// Cache line 1: bytes 1000-1063 (contains B, part of L)
+// Cache line 2: bytes 1064-1127 (rest of L, I, padding)
+// Accessing L requires loading TWO cache lines!
+```
+
+**Problems**:
+- Unaligned fields may span multiple cache lines
+- Accessing one field (like `L`) requires multiple cache loads
+- Wastes cache bandwidth (loading two cache lines instead of one)
+- Slower access (waiting for two memory loads instead of one)
+
+**The solution - Method 1: Sequential Layout with Pack**:
+```csharp
+// ✅ Aligned struct fits in cache lines efficiently
+[StructLayout(LayoutKind.Sequential, Pack = 8)]
+public struct AlignedItem
+{
+    public long L;      // 8 bytes at offset 0 (aligned to 8-byte boundary)
+    public int I;       // 4 bytes at offset 8
+    public byte B;      // 1 byte at offset 12
+    // Compiler adds padding to align next field or struct size
+    // Total size: 16 bytes (with padding)
+}
+
+// What happens in memory:
+// Offset 0:  L (8 bytes) - properly aligned!
+// Offset 8:  I (4 bytes)
+// Offset 12: B (1 byte)
+// Offset 13-15: Padding (3 bytes) to align struct to 16 bytes
+// 
+// If this struct starts at memory address 1000:
+// Cache line 1: bytes 1000-1063 (contains entire struct and more)
+// Accessing L requires loading only ONE cache line!
+```
+
+**How `Pack = 8` works**: The `Pack = 8` parameter tells the compiler to align fields to 8-byte boundaries. The `long L` field (8 bytes) is placed at offset 0 (a multiple of 8), ensuring it's properly aligned. The compiler also reorders fields if needed (though here we ordered them manually) and adds padding to maintain alignment.
+
+**The solution - Method 2: Explicit Layout with Field Offsets**:
+```csharp
+// ✅ Better: Explicit alignment for critical structures
+[StructLayout(LayoutKind.Explicit, Size = 64)] // One cache line (64 bytes)
+public struct CacheLineAlignedItem
+{
+    [FieldOffset(0)]
+    public long L;      // 8 bytes starting at byte 0, aligned
+    
+    [FieldOffset(8)]
+    public int I;       // 4 bytes starting at byte 8
+    
+    [FieldOffset(12)]
+    public byte B;      // 1 byte starting at byte 12
+    
+    // Remaining bytes 13-63 are unused (padding to reach 64 bytes)
+    // This ensures the struct fits in exactly one cache line
+}
+
+// What happens in memory:
+// Offset 0-7:   L (8 bytes) - aligned to cache line start
+// Offset 8-11:  I (4 bytes)
+// Offset 12:    B (1 byte)
+// Offset 13-63: Unused padding (51 bytes) to reach 64 bytes total
+// 
+// If this struct starts at memory address 1000:
+// Cache line 1: bytes 1000-1063 (contains entire struct)
+// All fields fit in ONE cache line - maximum cache efficiency!
+```
+
+**How explicit layout works**: With `LayoutKind.Explicit`, you control every byte. `[FieldOffset(0)]` places `L` at byte 0 (cache line aligned), `[FieldOffset(8)]` places `I` at byte 8, and `[FieldOffset(12)]` places `B` at byte 12. `Size = 64` ensures the struct is exactly 64 bytes (one cache line), with padding filling the remaining space.
+
+**Why explicit layout is better for cache alignment**: You can ensure the struct starts at a cache line boundary (offset 0) and fits within one cache line (64 bytes). This guarantees maximum cache efficiency—all fields are in the same cache line, and accessing any field loads the entire struct into cache.
+
+**Why it works**: Aligning structures to cache line boundaries ensures they fit efficiently in cache lines. Using `Pack = 8` with sequential layout aligns fields automatically, while explicit layout with `FieldOffset` gives you precise control. Both methods prevent fields from spanning multiple cache lines, maximizing cache line utilization and minimizing cache loads.
+
+**Performance**: 5-20% improvement for frequently accessed structures. Better cache line utilization and alignment means fewer cache loads and faster access times.
+
+#### Technique 5: Use Hybrid Layouts for Mixed Access Patterns
+
+**When**: You have mixed access patterns—sometimes single field, sometimes multiple fields.
+
+**The problem**:
+```csharp
+// ❌ AoS doesn't optimize single-field iteration
+public struct Item
+{
+    public int Id;
+    public double Value;
+}
+
+public class BadMixedPattern
+{
+    private Item[] _items = new Item[1000];
+    
+    public int SumIds()
+    {
+        int sum = 0;
+        foreach (var item in _items)
+        {
+            sum += item.Id; // Only need Id, but loads entire struct
+        }
+        return sum;
+    }
+    
+    public double SumIdValue()
+    {
+        double sum = 0;
+        foreach (var item in _items)
+        {
+            sum += item.Id + item.Value; // Needs both, AoS is good here
+        }
+        return sum;
+    }
+}
+```
+
+**Problems**:
+- AoS is good for multiple fields but poor for single field
+- Single-field iteration wastes cache space
+- Can't optimize both patterns simultaneously
+
+**The solution**:
+```csharp
+// ✅ Hybrid layout: SoA for single field, AoS view for multiple fields
+public class GoodMixedPattern
+{
+    // SoA for single-field iteration
+    private int[] _ids = new int[1000];
+    private double[] _values = new double[1000];
+    
+    // AoS view for multiple-field access
+    public struct ItemView
+    {
+        private readonly int[] _ids;
+        private readonly double[] _values;
+        private readonly int _index;
+        
+        public ItemView(int[] ids, double[] values, int index)
+        {
+            _ids = ids;
+            _values = values;
+            _index = index;
+        }
+        
+        public int Id => _ids[_index];
+        public double Value => _values[_index];
+    }
+    
+    public int SumIds()
+    {
+        int sum = 0;
+        foreach (var id in _ids) // SoA, cache-friendly for single field
+        {
+            sum += id;
+        }
+        return sum;
+    }
+    
+    public double SumIdValue()
+    {
+        double sum = 0;
+        for (int i = 0; i < _ids.Length; i++)
+        {
+            var item = new ItemView(_ids, _values, i); // AoS view
+            sum += item.Id + item.Value; // Access both, but data still in SoA
+        }
+        return sum;
+    }
+}
+```
+
+**Why it works**: Using SoA internally provides cache-friendly single-field iteration. Providing an AoS-like view (wrapper) maintains code clarity for multiple-field access. You get the best of both worlds—cache efficiency for single field, code clarity for multiple fields.
+
+**Performance**: Optimizes dominant pattern (single field iteration) while maintaining flexibility for multiple-field access.

@@ -1834,7 +1834,7 @@ Puede mejorar el rendimiento en un 5-20% para aplicaciones intensivas en memoria
 
 ---
 
-### Avoid unnecessary allocations
+### Avoid unnecessary allocations (Ok)
 
 **Cómo funciona:**
 Cada allocation en el heap requiere trabajo del garbage collector. Evitar allocations innecesarias reduce la presión en el GC y mejora el rendimiento.
@@ -1926,7 +1926,7 @@ public class BestAllocations
 
 ---
 
-### Cache-friendly memory layouts
+### Cache-friendly memory layouts (Ok)
 
 **Cómo funciona:**
 Organizar datos en memoria de manera que los datos accedidos juntos estén cerca mejora la localidad de caché y reduce cache misses.
@@ -2010,7 +2010,7 @@ public struct CacheFriendlyItem
 
 ---
 
-### Struct of Arrays instead of Array of Structs when iterating
+### Struct of Arrays instead of Array of Structs when iterating (Skipped)
 
 **Cómo funciona:**
 Struct of Arrays (SoA) almacena cada campo en un array separado, mientras que Array of Structs (AoS) almacena structs completos. Para iteraciones que solo acceden a un campo, SoA es más cache-friendly.
