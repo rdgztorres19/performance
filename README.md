@@ -2110,7 +2110,7 @@ public class GoodSoA
 
 ---
 
-### Memory-mapped I/O for large file access
+### Memory-mapped I/O for large file access (Ok)
 
 **Cómo funciona:**
 Memory-mapped I/O mapea un archivo directamente en el espacio de direcciones virtual del proceso, permitiendo acceso directo a los datos del archivo como si estuvieran en memoria. El sistema operativo maneja la carga y descarga de páginas automáticamente.
@@ -2179,7 +2179,7 @@ public class MemoryMappedFileAccess
 
 ---
 
-### Use mlock() to prevent memory from being swapped
+### Use mlock() to prevent memory from being swapped (Skipped)
 
 **Cómo funciona:**
 mlock() (y mlockall() en Linux) previene que el sistema operativo mueva páginas de memoria al swap, garantizando que estén siempre en RAM. Esto es crítico para aplicaciones de baja latencia.
@@ -2209,7 +2209,7 @@ Puede eliminar latencia de swapping completamente, mejorando la latencia P99 en 
 
 ---
 
-### Memory prefetching hints (__builtin_prefetch)
+### Memory prefetching hints (__builtin_prefetch) (Pending)
 
 **Cómo funciona:**
 Los hints de prefetch le dicen al procesador que cargue datos en caché antes de que se necesiten. Esto es útil cuando se conoce el patrón de acceso futuro.
@@ -2237,7 +2237,7 @@ Puede mejorar el rendimiento en un 5-15% para loops con acceso a memoria predeci
 
 ---
 
-### Cache line alignment (64-byte alignment)
+### Cache line alignment (64-byte alignment) (Skipped)
 
 **Cómo funciona:**
 Las líneas de caché típicamente son de 64 bytes. Alinear estructuras de datos a límites de 64 bytes puede mejorar el rendimiento al evitar que una estructura cruce múltiples líneas de caché.
