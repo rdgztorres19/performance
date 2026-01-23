@@ -2291,7 +2291,7 @@ public unsafe class AlignedArray
 
 ---
 
-### Memory barriers for lock-free programming
+### Memory barriers for lock-free programming (Ok)
 
 **Cómo funciona:**
 Memory barriers (fences) aseguran que las operaciones de memoria se completen en un orden específico, crítico para programación lock-free donde múltiples threads acceden a datos compartidos sin locks.
@@ -2629,7 +2629,7 @@ Puede mejorar el rendimiento en un 5-20% para aplicaciones con grandes espacios 
 
 ---
 
-### Memory bandwidth optimization
+### Memory bandwidth optimization (Skipped)
 
 **Cómo funciona:**
 Memory bandwidth optimization implica organizar el acceso a memoria para maximizar el uso del ancho de banda disponible, típicamente mediante acceso secuencial y prefetching.
@@ -2746,7 +2746,7 @@ Puede reducir el uso de memoria en un 10-50% cuando hay muchos datos duplicados.
 
 ---
 
-### Use memory-mapped files for shared data
+### Use memory-mapped files for shared data (Skipped)
 
 **Cómo funciona:**
 Memory-mapped files permiten que múltiples procesos compartan la misma memoria mapeada desde un archivo, permitiendo comunicación eficiente entre procesos.
