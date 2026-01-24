@@ -2846,7 +2846,7 @@ Puede mejorar el rendimiento de I/O en un 10-100x comparado con HDD. Para I/O al
 
 ---
 
-### Sequential IO over random IO
+### Sequential IO over random IO (OK)
 
 **Cómo funciona:**
 El acceso secuencial a disco es mucho más rápido que el acceso aleatorio porque aprovecha mejor el ancho de banda del disco y reduce la latencia de búsqueda.
@@ -2930,7 +2930,7 @@ public class BestSequentialIO
 
 ---
 
-### Asynchronous IO
+### Asynchronous IO (Ok)
 
 **Cómo funciona:**
 Asynchronous IO permite que el sistema operativo y la aplicación continúen procesando otras operaciones mientras se espera que se complete una operación de I/O, mejorando el throughput y la capacidad de respuesta.
@@ -2974,7 +2974,7 @@ public async Task ProcessFileAsync(string filePath)
 
 ---
 
-### Write batching
+### Write batching (Ok)
 
 **Cómo funciona:**
 Agrupar múltiples escrituras en un solo batch reduce el número de llamadas al sistema y mejora el rendimiento al aprovechar mejor el ancho de banda del disco.
@@ -3073,7 +3073,7 @@ Puede mejorar el rendimiento en un 10-50% para acceso secuencial. El impacto es 
 
 ---
 
-### Append-only storage
+### Append-only storage (Ok)
 
 **Cómo funciona:**
 Append-only storage solo permite agregar datos al final, nunca modificar o eliminar datos existentes. Esto simplifica la implementación y mejora el rendimiento de escritura.
@@ -3137,7 +3137,7 @@ public class AppendOnlyLog
 
 ---
 
-### Memory-mapped files
+### Memory-mapped files (Skipped)
 
 **Cómo funciona:**
 Memory-mapped files mapean un archivo directamente en el espacio de direcciones virtual del proceso, permitiendo acceso directo a los datos del archivo como si estuvieran en memoria.
