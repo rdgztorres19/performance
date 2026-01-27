@@ -4763,11 +4763,13 @@ public class AppendOnlyLogger
 - **Write throughput**: ~50–150 MB/s (HDD), ~200–500 MB/s (SSD)
 - **Write latency**: ~1–5 ms per log entry
 - **Space**: Grows unbounded (rotate/delete old logs periodically)
-Scenario 2: Event sourcing (append-only event store)
-Problem: An e-commerce system that tracks all user actions (orders, payments, shipments) as events. You need complete history for auditing and debugging.
+#### Scenario 2: Event sourcing (append-only event store)
 
-Solution: Store all events in an append-only log. Current state is derived by replaying events.
+**Problem**: An e-commerce system that tracks all user actions (orders, payments, shipments) as events. You need complete history for auditing and debugging.
 
+**Solution**: Store all events in an append-only log. Current state is derived by replaying events.
+
+```csharp
 // Event store (append-only)
 public class EventStore
 {
@@ -4822,21 +4824,24 @@ public class EventStore
 public record Event(string EntityId, string Type, DateTime Timestamp);
 public record OrderCreated(string OrderId, string UserId, DateTime Timestamp) : Event(OrderId, "OrderCreated", Timestamp);
 public record OrderPaid(string OrderId, decimal Amount, DateTime Timestamp) : Event(OrderId, "OrderPaid", Timestamp);
-Why it works:
+```
 
-Complete audit trail (every change is an event)
-Immutable events (can't be tampered with)
-Fast writes (sequential appends)
-Can rebuild state by replaying events
-Trade-offs:
+**Why it works:**
+- Complete audit trail (every change is an event)
+- Immutable events (can't be tampered with)
+- Fast writes (sequential appends)
+- Can rebuild state by replaying events
 
-Reads are slower (must replay all events or maintain snapshots)
-Space grows unbounded (need periodic compaction or archival)
-Scenario 3: Write-Ahead Log (WAL) for durability
-Problem: A database needs to guarantee durability?once a transaction commits, data is safe even if the system crashes.
+**Trade-offs:**
+- Reads are slower (must replay all events or maintain snapshots)
+- Space grows unbounded (need periodic compaction or archival)
+#### Scenario 3: Write-Ahead Log (WAL) for durability
 
-Solution: Write all changes to an append-only WAL before applying them to the main data files.
+**Problem**: A database needs to guarantee durability—once a transaction commits, data is safe even if the system crashes.
 
+**Solution**: Write all changes to an append-only WAL before applying them to the main data files.
+
+```csharp
 // Simplified WAL implementation
 public class WriteAheadLog
 {
@@ -4871,9 +4876,1459 @@ public class WriteAheadLog
 }
 
 public record Transaction(string Id, string Operation, string Data, DateTime Timestamp);
-Why it works:
+```
 
-Durability: Once written to WAL, data is safe
-Fast writes: Append-only (sequential)
-Crash recovery: Replay WAL to restore state
-Used by: PostgreSQL, MySQL, Redis, Cassandra, MongoDB
+**Why it works:**
+- **Durability**: Once written to WAL, data is safe
+- **Fast writes**: Append-only (sequential)
+- **Crash recovery**: Replay WAL to restore state
+
+**Used by**: PostgreSQL, MySQL, Redis, Cassandra, MongoDB
+
+---
+
+## Avoid Frequent fsync Calls to Maximize Write Throughput
+
+fsync (File SYNC) is a system call that forces all buffered (cached) data for a file to be written to physical storage (disk, SSD). When you write data, it normally goes to the OS page cache (RAM) first, and the OS writes it to disk later (asynchronously). fsync blocks until all data is physically on disk, providing durability guarantees but at a massive performance cost. Each fsync can take 1–10 ms (HDD) or 0.1–1 ms (SSD), and calling it after every write turns a throughput-oriented operation into a latency-dominated one.
+
+### Basic Concepts
+
+**What is fsync?** A system call that forces buffered file data to be written to physical storage. On Linux: `fsync(fd)`. On Windows: `FlushFileBuffers(handle)`. In .NET: `FileStream.Flush(true)`.
+
+**What happens when you write without fsync?**
+1. You call `write()` (or `FileStream.Write()`)
+2. Data goes into the OS **page cache** (RAM)
+3. The write call returns immediately (fast!)
+4. The OS writes data to disk **asynchronously** in the background (seconds later)
+5. If the system crashes before data is written, it's lost
+
+**What happens when you call fsync?**
+1. You call `fsync(fd)` (or `Flush(true)`)
+2. OS flushes all cached data for that file to disk
+3. OS waits for disk to confirm data is physically written
+4. fsync returns (slow! 1–10 ms on HDD, 0.1–1 ms on SSD)
+5. Data is now **durable** (safe even if system crashes)
+
+### Key Terms
+
+**What is the page cache?** A RAM cache managed by the OS that holds recently read/written file data. When you write to a file, data goes to the page cache first (fast), and the OS writes it to disk later (async). This makes writes fast but means data isn't immediately durable.
+
+**What is durability?** A guarantee that once an operation succeeds, the data is safe—even if the system crashes immediately after. To achieve durability, you must call fsync to force data to physical storage.
+
+**What is group commit?** A database optimization: batch multiple transactions' writes, then fsync once for the whole batch. Example: 100 transactions write to WAL, then one fsync commits all 100. This amortizes fsync cost.
+
+**What is the fsync latency?** How long fsync takes to complete:
+- **HDD**: 1–10 ms (limited by disk rotation speed, seek time)
+- **SATA SSD**: 0.1–1 ms (limited by flash write speed, FTL overhead)
+- **NVMe SSD**: 0.05–0.5 ms (faster, but still expensive)
+- **Network storage (EBS, NFS)**: 1–10 ms (adds network round trip)
+
+### Common Misconceptions
+
+**"SSDs make fsync cheap"**
+- **The truth**: SSDs are 10×–100× faster than HDDs for fsync, but fsync is still expensive compared to async writes. Example: Async write = 1 µs, fsync = 0.1–1 ms → fsync is 100×–1000× slower.
+
+**"I need fsync after every write to guarantee durability"**
+- **The truth**: You only need fsync at **transaction boundaries** or **logical commit points**. Example: A database doesn't fsync after every SQL statement—it fsyncs when you commit a transaction (group commit). Batch your writes.
+
+### Why This Becomes a Bottleneck
+
+**Latency dominates throughput**: Each fsync blocks for 1–10 ms. If you fsync after every write, your throughput is limited by fsync latency. Example: 10 ms per fsync = max 100 operations/sec (far below what the disk can do with async writes).
+
+**Serialization**: fsync is typically serialized (one at a time). Even if you have multiple threads writing, they all wait for the same disk to flush. This creates contention.
+
+**Key insight**: fsync is ~1000× slower than an async write. Minimize fsync calls.
+
+### How It Works
+
+#### Understanding fsync and the Page Cache
+
+**How writes work without fsync:**
+
+```csharp
+// Fast writes (async, no durability)
+using var fs = new FileStream("data.txt", FileMode.Append);
+byte[] data = System.Text.Encoding.UTF8.GetBytes("Hello\n");
+fs.Write(data, 0, data.Length);  // ~1 µs (goes to page cache)
+// Data is in RAM, not on disk yet!
+```
+
+**What happens:**
+1. `Write()` copies data to the OS page cache (RAM)
+2. `Write()` returns immediately (~1 µs)
+3. OS schedules async write to disk (happens seconds later in background)
+4. **If system crashes before disk write, data is lost**
+
+**How writes work with fsync:**
+
+```csharp
+// Slow writes (sync, durable)
+using var fs = new FileStream("data.txt", FileMode.Append);
+byte[] data = System.Text.Encoding.UTF8.GetBytes("Hello\n");
+fs.Write(data, 0, data.Length);  // ~1 µs (goes to page cache)
+fs.Flush(true);  // fsync! Blocks 1–10 ms until data is on disk
+// Data is now safely on disk
+```
+
+**What happens:**
+1. `Write()` copies data to page cache (~1 µs)
+2. `Flush(true)` calls fsync, which:
+   - Flushes all dirty pages for this file to disk
+   - Waits for disk to confirm write
+   - Returns when data is physically on disk
+3. **Total time: 1–10 ms (HDD) or 0.1–1 ms (SSD)**
+4. Data is now durable
+
+**Key insight**: fsync is ~1000× slower than an async write. Minimize fsync calls.
+
+#### Technical Details: What Happens at the Disk Level
+
+**Why fsync is slow (HDD):**
+- Disk must physically write data to magnetic platters
+- This requires:
+  - Seek to correct track (5–15 ms)
+  - Wait for platter to rotate to correct sector (0–8 ms)
+  - Write data (1–2 ms)
+- Total: ~5–15 ms per fsync
+
+**Why fsync is slow (SSD):**
+- Flash memory must be programmed (written)
+- This requires:
+  - FTL (Flash Translation Layer) overhead (mapping logical to physical pages)
+  - Flash program operation (~100–500 µs)
+  - Power-loss capacitor flush (ensures data survives power failure)
+- Total: ~0.1–1 ms per fsync (10×–100× faster than HDD, but still expensive)
+
+**Why fsync is slow (network storage):**
+- Data must be sent over network + written to remote disk
+- This requires:
+  - Network round trip (1–10 ms)
+  - Remote disk write (1–10 ms)
+- Total: ~2–20 ms per fsync (worst case)
+
+### Example Scenarios
+
+#### Scenario 1: High-throughput logging (avoid per-write fsync)
+
+**Problem**: A web server logs 10,000 requests/sec. Calling fsync after every log entry limits throughput to 100–1000 logs/sec.
+
+**Bad code** (fsync after every write):
+
+```csharp
+// ❌ Bad: fsync after every write (~100 logs/sec max on HDD)
+public class BadLogger
+{
+    public void Log(string message)
+    {
+        using var fs = new FileStream("app.log", FileMode.Append, FileAccess.Write, FileShare.Read);
+        byte[] data = System.Text.Encoding.UTF8.GetBytes($"{DateTime.UtcNow:O} {message}\n");
+        fs.Write(data, 0, data.Length);
+        fs.Flush(true);  // fsync! Blocks 1–10 ms
+    }
+}
+```
+
+**Good code** (batch writes, fsync every 1 second):
+
+```csharp
+// ✅ Good: batch writes, fsync every 1 second
+public class GoodLogger
+{
+    private readonly BlockingCollection<string> _queue = new BlockingCollection<string>(10000);
+    private readonly Thread _writerThread;
+
+    public GoodLogger()
+    {
+        _writerThread = new Thread(WriterLoop) { IsBackground = true };
+        _writerThread.Start();
+    }
+
+    public void Log(string message)
+    {
+        _queue.Add($"{DateTime.UtcNow:O} {message}");  // Fast, non-blocking
+    }
+
+    private void WriterLoop()
+    {
+        using var fs = new FileStream("app.log", FileMode.Append, FileAccess.Write, FileShare.Read, bufferSize: 64 * 1024);
+
+        var lastFlush = DateTime.UtcNow;
+        var buffer = new List<byte[]>(1000);
+
+        foreach (var message in _queue.GetConsumingEnumerable())
+        {
+            buffer.Add(System.Text.Encoding.UTF8.GetBytes(message + "\n"));
+
+            // Flush every 1 second OR when buffer is large
+            if ((DateTime.UtcNow - lastFlush).TotalSeconds >= 1.0 || buffer.Count >= 1000)
+            {
+                foreach (var data in buffer)
+                    fs.Write(data, 0, data.Length);
+
+                fs.Flush(true);  // fsync once for entire batch
+                lastFlush = DateTime.UtcNow;
+                buffer.Clear();
+            }
+        }
+    }
+}
+```
+
+**Results**:
+- **Bad**: 100–1000 logs/sec (limited by fsync)
+- **Good**: 10,000 logs/sec (batched, fsync every 1 second)
+- **Improvement**: 10×–100×
+- **Trade-off**: Can lose up to 1 second of logs on crash (usually acceptable for logs)
+
+#### Scenario 2: Database transaction commit (group commit)
+
+**Problem**: A database commits 1000 transactions/sec. Calling fsync after every commit limits throughput to 100–1000 tx/sec.
+
+**Bad approach** (fsync per transaction):
+
+```csharp
+// ❌ Bad: fsync after every transaction (~100 tx/sec max)
+public void CommitTransaction(Transaction tx)
+{
+    WriteToWAL(tx);  // Write to write-ahead log
+    walFile.Flush(true);  // fsync! Blocks 1–10 ms
+}
+```
+
+**Good approach** (group commit):
+
+```csharp
+// ✅ Good: group commit (batch multiple transactions)
+private readonly List<Transaction> _pendingTransactions = new List<Transaction>();
+private readonly Timer _commitTimer;
+
+public DatabaseWithGroupCommit()
+{
+    // Commit every 10 ms
+    _commitTimer = new Timer(_ => GroupCommit(), null, 10, 10);
+}
+
+public void BeginTransaction(Transaction tx)
+{
+    lock (_pendingTransactions)
+    {
+        _pendingTransactions.Add(tx);
+        WriteToWAL(tx);  // Write to WAL (buffered)
+    }
+}
+
+private void GroupCommit()
+{
+    lock (_pendingTransactions)
+    {
+        if (_pendingTransactions.Count == 0)
+            return;
+
+        walFile.Flush(true);  // fsync once for all pending transactions
+
+        // Mark all as committed
+        foreach (var tx in _pendingTransactions)
+            tx.MarkCommitted();
+
+        _pendingTransactions.Clear();
+    }
+}
+```
+
+**Results**:
+- **Bad**: 100–1000 tx/sec (limited by fsync)
+- **Good**: 10,000+ tx/sec (group commit every 10 ms)
+- **Improvement**: 10×–100×
+- **Trade-off**: Transactions wait up to 10 ms for commit (usually acceptable)
+
+### Key Takeaways
+
+- fsync is **~1000× slower** than async write (1–10 ms vs 1 µs)
+- Calling fsync after every write limits throughput to **100–1000 ops/sec** (HDD) or **1,000–10,000 ops/sec** (SSD)
+- **Solution**: Batch writes and fsync periodically (e.g., every 100 ms or every 1000 writes)
+- **Trade-off**: Risk of data loss on crash (unflushed data is lost)
+- **Use frequent fsync for**: Critical data (financial transactions, user data)
+- **Avoid frequent fsync for**: High-throughput workloads (logging, metrics, analytics)
+- **Typical improvements**: 10×–100× higher write throughput when reducing fsync frequency
+
+---
+
+## Avoid Many Small Files to Reduce Filesystem Overhead and Improve I/O Performance
+
+Every file in a filesystem requires metadata (inode, directory entry, allocation table entry). When you create thousands or millions of small files, the overhead of managing this metadata dominates I/O performance. Operations like listing directories, opening files, or performing backups become extremely slow because the filesystem must traverse and load metadata for every file. Additionally, many small files cause fragmentation, increase seek overhead on HDDs, and amplify FTL (Flash Translation Layer) overhead on SSDs.
+
+### Basic Concepts
+
+**What is the problem with many small files?**
+
+Imagine you have a system that stores 10 million small JSON files (each 1 KB):
+- **Opening each file** requires: path resolution, loading inode, allocating file descriptor, reading first data block
+- **Cost per file**: HDD: 5–15 ms | SSD: 0.1–1 ms
+- **Total time for 10M files**: HDD: 27 hours | SSD: 1.4 hours
+
+**Real-world example**: A logging system that creates one file per log entry (10,000 logs/sec) will generate 86.4 million files per day → directory listing takes hours, backup is impossible, filesystem runs out of inodes.
+
+### Key Terms
+
+**What is an inode?** A data structure used by Unix-like filesystems to store metadata about a file (size, permissions, timestamps, pointers to data blocks). Each file requires one inode. Filesystems have a fixed maximum number of inodes (e.g., 10 million), and creating too many small files can exhaust inodes even if disk space remains.
+
+**What is filesystem metadata?** Information about files that isn't the actual data: filename, directory structure, permissions, timestamps, file size, block allocation. Managing this metadata has overhead—creating, deleting, or listing many files requires many metadata operations.
+
+**What is directory traversal overhead?** The cost of resolving a file path like `items/0/42.json`. The filesystem must:
+1. Open the root directory (`/`)
+2. Search for `items` directory entry
+3. Open `items` directory
+4. Search for `0` subdirectory entry
+5. Open `0` subdirectory
+6. Search for `42.json` file entry
+7. Load the file's inode
+
+This is slow when repeated millions of times.
+
+**What is inode exhaustion?** When a filesystem runs out of inodes (file metadata slots), you can't create new files even if disk space remains. Example: An ext4 filesystem with 10 million inodes can store at most 10 million files, regardless of their size.
+
+### How It Works
+
+**How filesystems manage files:**
+
+1. **Directory**: A special file that maps filenames to inode numbers
+   - Example: `items/` directory contains entries like `0.json → inode 12345`
+   - Searching a directory requires scanning or indexing these entries
+
+2. **Inode**: A data structure that stores file metadata
+   - Size, permissions, timestamps, owner, block pointers
+   - Stored in a fixed-size inode table (e.g., 10 million inodes for a 1 TB filesystem)
+
+3. **Data blocks**: The actual file content
+   - Minimum allocation unit (e.g., 4 KB blocks)
+   - A 1 KB file still consumes 4 KB on disk (75% waste)
+
+**Performance comparison: Reading 10,000 small files (1 KB each) vs 1 large file (10 MB)**
+
+| Operation | Many small files (10,000 × 1 KB) | One large file (10 MB) | Improvement |
+|-----------|----------------------------------|----------------------|-------------|
+| **Open file** | 10,000 × 0.1 ms = 1000 ms | 1 × 0.1 ms = 0.1 ms | **10,000×** |
+| **Read data** | 10,000 × 0.05 ms = 500 ms | 1 × 20 ms = 20 ms | **25×** |
+| **Total** | **1500 ms** | **20 ms** | **75×** |
+
+**Key insight**: The overhead of opening files dominates. Consolidating files eliminates most of this overhead.
+
+**Why opening a file is expensive:**
+
+1. **Path resolution** (for `items/0/42.json`):
+   - Open root directory inode
+   - Search root directory for `items` entry
+   - Open `items` directory inode
+   - Search `items` for `0` entry
+   - Open `0` directory inode
+   - Search `0` for `42.json` entry
+   - Open `42.json` inode
+   - **Total: 7 inode lookups + 3 directory searches**
+
+2. **Inode loading**:
+   - Read inode from disk (or inode cache)
+   - Parse block pointers
+   - Allocate file descriptor
+
+3. **First block read**:
+   - Resolve logical block to physical block
+   - Issue disk read
+   - Copy data to page cache
+
+**On HDD**: Each inode lookup can require a seek (5–15 ms). Total: ~50 ms per file.
+
+**On SSD**: Each inode lookup is fast (0.1 ms), but FTL overhead and metadata reads add up. Total: ~0.5 ms per file.
+
+**Why large files are faster:**
+- **Single open**: All overhead is paid once
+- **Sequential reads**: Disk can read many blocks in one operation
+- **Prefetching**: OS can predict and prefetch next blocks
+- **Fewer metadata operations**: One inode vs millions
+
+### Why This Becomes a Bottleneck
+
+**Metadata operations dominate**: Spending 1000 ms opening files vs 20 ms reading data means 98% of time is wasted on metadata.
+
+**Directory traversal is slow**: Large directories (>10,000 entries) degrade performance because the filesystem must scan or search the directory.
+
+**Inode cache pressure**: The OS caches recently accessed inodes in memory. With millions of files, the inode cache thrashes, forcing repeated disk reads.
+
+**Backup/archival slowdowns**: Tools like `tar`, `rsync`, or `cp` must stat() every file, which is slow for millions of files. Backups can take hours or days.
+
+**Filesystem fragmentation**: Many small files scatter data across the disk, increasing seek overhead on HDDs and FTL overhead on SSDs.
+
+**Inode exhaustion**: Running out of inodes prevents creating new files, even if disk space remains. This causes mysterious "No space left on device" errors.
+
+### Common Misconceptions
+
+**"SSDs eliminate the small file problem"**
+- **The truth**: SSDs are much faster than HDDs for small files (0.1–1 ms vs 5–15 ms per file), but they still suffer from FTL overhead, metadata overhead, and inode exhaustion. Consolidating files still improves performance by 5×–10× on SSDs.
+
+**"I can just use more directories to avoid large directories"**
+- **The truth**: Splitting files into many subdirectories reduces per-directory overhead but doesn't eliminate the fundamental problem: you still have millions of inodes and metadata operations. Directory traversal is still slow.
+
+### Example Scenarios
+
+#### Scenario 1: High-volume logging (consolidate log files)
+
+**Problem**: A web server logs every request to a separate file. This generates 10,000 log files per second (86.4 million files per day).
+
+**Bad approach** (one file per log entry):
+
+```csharp
+// ❌ Bad: One file per log entry
+public class BadLogger
+{
+    public void Log(string message)
+    {
+        var logId = Guid.NewGuid();
+        var logPath = $"logs/{DateTime.UtcNow:yyyy-MM-dd}/{logId}.log";
+        File.WriteAllText(logPath, $"{DateTime.UtcNow:O} {message}");
+    }
+}
+```
+
+**Why this fails**:
+- 86.4 million files per day
+- Directory listing takes hours
+- Backup is impossible
+- Filesystem runs out of inodes
+
+**Good approach** (consolidate into hourly files):
+
+```csharp
+// ✅ Good: Consolidate into hourly log files
+public class GoodLogger
+{
+    private readonly SemaphoreSlim _lock = new SemaphoreSlim(1, 1);
+
+    public async Task LogAsync(string message)
+    {
+        var logPath = $"logs/{DateTime.UtcNow:yyyy-MM-dd-HH}.log";
+        var logEntry = $"{DateTime.UtcNow:O} {message}\n";
+
+        await _lock.WaitAsync();
+        try
+        {
+            await File.AppendAllTextAsync(logPath, logEntry);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+}
+```
+
+**Results**:
+- **Bad**: 86.4M files/day → filesystem exhaustion
+- **Good**: 24 files/day → manageable, fast backups
+- **Improvement**: 3.6 million× fewer files
+
+#### Scenario 2: User-generated content (use database instead of files)
+
+**Problem**: A social media platform stores user posts as individual JSON files. With 10 million users posting 10 times per day, this creates 100 million files per day.
+
+**Bad approach** (one file per post):
+
+```csharp
+// ❌ Bad: One file per post
+public class BadPostStorage
+{
+    public async Task SavePostAsync(Post post)
+    {
+        var postPath = $"posts/{post.UserId}/{post.PostId}.json";
+        Directory.CreateDirectory(Path.GetDirectoryName(postPath));
+        await File.WriteAllTextAsync(postPath, JsonSerializer.Serialize(post));
+    }
+
+    public async Task<Post> GetPostAsync(string userId, string postId)
+    {
+        var postPath = $"posts/{userId}/{postId}.json";
+        var json = await File.ReadAllTextAsync(postPath);  // Slow: open file
+        return JsonSerializer.Deserialize<Post>(json);
+    }
+}
+```
+
+**Why this fails**:
+- 100 million new files per day
+- Listing a user's posts requires directory traversal (slow)
+- Queries like "get all posts from last week" require opening millions of files
+
+**Good approach** (use database):
+
+```csharp
+// ✅ Good: Use database instead of files
+public class GoodPostStorage
+{
+    private readonly IDbConnection _db;
+
+    public async Task SavePostAsync(Post post)
+    {
+        await _db.ExecuteAsync(
+            "INSERT INTO Posts (UserId, PostId, Content, CreatedAt) VALUES (@UserId, @PostId, @Content, @CreatedAt)",
+            post);
+    }
+
+    public async Task<Post> GetPostAsync(string userId, string postId)
+    {
+        return await _db.QuerySingleAsync<Post>(
+            "SELECT * FROM Posts WHERE UserId = @UserId AND PostId = @PostId",
+            new { UserId = userId, PostId = postId });
+    }
+
+    public async Task<List<Post>> GetUserPostsAsync(string userId, int limit = 50)
+    {
+        return (await _db.QueryAsync<Post>(
+            "SELECT * FROM Posts WHERE UserId = @UserId ORDER BY CreatedAt DESC LIMIT @Limit",
+            new { UserId = userId, Limit = limit })).ToList();
+    }
+}
+```
+
+---
+
+## Preallocate File Space to Reduce Fragmentation and Improve Write Performance
+
+When you write to a file without preallocation, the filesystem allocates disk blocks on-demand as the file grows. This causes **fragmentation** (file data scattered across non-contiguous blocks) and **allocation overhead** (repeated metadata updates). On HDDs, fragmentation forces multiple seeks during reads/writes (5–15 ms per seek). On SSDs, fragmentation increases **FTL (Flash Translation Layer)** overhead and **write amplification**. Preallocating file space using `fallocate()` (Linux), `SetFileValidData()` (Windows), or `FileStream.SetLength()` (.NET) reserves disk space upfront, reducing fragmentation and allocation overhead.
+
+### What happens without preallocation?
+
+Imagine you're writing a 1 GB log file incrementally (1 MB at a time):
+
+- **First write (1 MB)**:
+  - Filesystem finds free blocks (e.g., blocks 1000–1255)
+  - Allocates blocks, updates inode and allocation tables
+  - Writes data
+- **Second write (1 MB)**:
+  - Filesystem finds more free blocks (e.g., blocks 5000–5255) ← not contiguous
+  - Allocates blocks, updates metadata
+  - Writes data
+- **After 1000 writes**:
+  - File is scattered across 1000 non-contiguous regions (many extents)
+  - Reading the file requires many seeks on HDD (e.g., ~1000 seeks ≈ ~10 seconds of seek time)
+  - Each write paid allocation overhead (~0.1–1 ms per allocation)
+
+### Key terms
+
+- **File preallocation**: Reserving disk space for a file *before* writing. Blocks may contain garbage data unless you use zero-fill preallocation.
+- **Fragmentation**: File data scattered across non-contiguous blocks. On HDDs this turns sequential I/O into seek-heavy random I/O.
+- **Allocation overhead**: Cost to find free blocks and update metadata (inode, bitmaps/B-trees, extents). Example: 1000 allocations × 0.5 ms ≈ 500 ms overhead.
+- **`fallocate()`** (Linux): Preallocates file space.
+  - `FALLOC_FL_KEEP_SIZE`: reserve space without changing visible file size
+  - default: reserve space and set file size (unwritten areas read as garbage)
+  - `FALLOC_FL_ZERO_RANGE`: reserve and zero-fill (slower, safer)
+- **Write amplification** (SSD): Writing small amounts can trigger rewriting much larger erase blocks; fragmentation can increase this via extra mapping/GC work.
+
+### Common misconception
+
+- **“Preallocation wastes disk space”**
+  - **Truth**: Yes, it reserves space immediately, but for critical large sequential files (databases, WALs, media) the performance wins can justify the cost.
+
+### How it works
+
+**Without preallocation (allocate-as-you-grow):**
+
+- **Initial file creation**:
+  - Create inode with size = 0, no blocks allocated
+- **First write (1 MB)**:
+  - Search allocation bitmap/B-tree for free blocks (e.g., 256 × 4 KB blocks)
+  - Allocate blocks, update inode extents and allocation tables
+  - Write data
+  - Example cost: 0.5 ms allocation + 5 ms write = 5.5 ms
+- **Second write (1 MB)**:
+  - Search for more free blocks (may not be contiguous)
+  - Allocate another extent, update metadata
+  - Example cost: 0.5 ms allocation + 5 ms write + 10 ms seek = 15.5 ms (seek penalty on HDD)
+
+**With preallocation:**
+
+```csharp
+// ❌ Without preallocation (slow, fragmented)
+public void WriteLogWithoutPreallocation(string logPath)
+{
+    using var fs = new FileStream(logPath, FileMode.Append, FileAccess.Write);
+    for (int i = 0; i < 1000; i++)
+    {
+        byte[] data = GenerateLogData(1024 * 1024); // 1 MB
+        fs.Write(data, 0, data.Length);  // Each write: allocation overhead + fragmentation risk
+    }
+}
+
+// ✅ With preallocation (fast, contiguous)
+public void WriteLogWithPreallocation(string logPath)
+{
+    using var fs = new FileStream(logPath, FileMode.Create, FileAccess.Write);
+
+    // Preallocate 1 GB (1000 MB)
+    fs.SetLength(1024L * 1024 * 1024); // On Linux ext4/XFS, this typically calls fallocate()
+    fs.Position = 0;
+
+    for (int i = 0; i < 1000; i++)
+    {
+        byte[] data = GenerateLogData(1024 * 1024); // 1 MB
+        fs.Write(data, 0, data.Length);  // Fast: no repeated allocation, fewer extents
+    }
+}
+```
+
+### Technical details (filesystem internals)
+
+**What happens during `fallocate()` (Linux):**
+
+- **Find contiguous free space**:
+  - Filesystem searches for a contiguous region large enough for the request
+  - Example: For a 1 GB file (≈256,000 × 4 KB blocks), find a large free run
+- **Allocate blocks**:
+  - Mark blocks as allocated in the bitmap/B-tree
+  - Update inode with a large extent (ideally one extent)
+- **Update metadata**:
+  - Set file size to 1 GB (or keep size = 0 with `FALLOC_FL_KEEP_SIZE`)
+  - No user data is written (unless zero-fill is requested)
+- **Future writes**:
+  - Writes go directly to already-reserved blocks (no repeated block search)
+  - On HDD, sequential writes stay sequential (fewer seeks)
+
+### Why this becomes a bottleneck (if you don’t preallocate)
+
+- **Allocation overhead accumulates**: 1000 allocations × ~0.5 ms ≈ 500 ms overhead.
+- **Fragmentation kills HDD performance**: seeks between extents dominate (e.g., 500 seeks × 10 ms ≈ 5 seconds wasted).
+- **SSD FTL overhead**: more scattered mappings → more GC pressure → higher write amplification (often 2×–5× slower).
+- **Metadata bloat**: many extents enlarge inode metadata and slow some filesystem operations.
+
+### Disadvantages and trade-offs
+
+- **Immediate disk space consumption**: space is reserved even if not written yet.
+- **Wasted space if overestimated**: preallocate 1 GB but only write 500 MB → 500 MB wasted.
+
+### When to use this approach
+
+Preallocate when:
+
+- **Large files** (>100 MB): DB files, video recordings, disk images
+- **Sequential writes dominate**: logs, WAL, time-series ingestion
+- **Predictable file size**: video duration/bitrate, fixed-size tablespaces
+- **HDD storage**: biggest wins due to seek elimination
+
+### Example scenarios
+
+#### Scenario 1: Database write-ahead log (WAL)
+
+**Problem**: WAL grows continuously; without preallocation it fragments, making checkpoint reads slower.
+
+```csharp
+// ❌ Bad: No preallocation (fragmented WAL)
+public class DatabaseWALWithoutPreallocation
+{
+    private FileStream _wal;
+
+    public void Initialize(string walPath)
+    {
+        _wal = new FileStream(walPath, FileMode.Append, FileAccess.Write);
+    }
+
+    public void WriteTransaction(byte[] txData)
+    {
+        _wal.Write(txData, 0, txData.Length);  // Incremental allocation → fragmentation
+    }
+
+    public void Checkpoint()
+    {
+        _wal.Flush();
+        // Read entire WAL (fragmented → many seeks on HDD → slow)
+    }
+}
+
+// ✅ Good: Preallocate WAL (contiguous, fast)
+public class DatabaseWALWithPreallocation
+{
+    private FileStream _wal;
+    private long _walSize = 1024L * 1024 * 1024; // 1 GB
+
+    public void Initialize(string walPath)
+    {
+        _wal = new FileStream(walPath, FileMode.Create, FileAccess.Write);
+        _wal.SetLength(_walSize); // Preallocate
+        _wal.Position = 0;
+    }
+
+    public void WriteTransaction(byte[] txData)
+    {
+        _wal.Write(txData, 0, txData.Length);  // Fast: no allocation, fewer extents
+    }
+}
+```
+
+**Results**:
+
+- **Bad**: WAL fragments over time (100+ extents), checkpoint reads take ~15s (HDD)
+- **Good**: WAL stays contiguous (≈1 extent), checkpoint reads take ~5s (HDD)
+- **Improvement**: ~3× faster checkpoints
+
+#### Scenario 2: Video recording
+
+**Problem**: Allocation/fragmentation can cause latency spikes that drop frames.
+
+```csharp
+// ❌ Bad: No preallocation (dropped frames risk)
+public class VideoRecorderWithoutPreallocation
+{
+    private FileStream _videoFile;
+
+    public void StartRecording(string videoPath)
+    {
+        _videoFile = new FileStream(videoPath, FileMode.Create, FileAccess.Write);
+    }
+
+    public void WriteFrame(byte[] frameData)
+    {
+        _videoFile.Write(frameData, 0, frameData.Length);  // Allocation overhead → latency spike
+    }
+}
+
+// ✅ Good: Preallocate (predictable write latency)
+public class VideoRecorderWithPreallocation
+{
+    private FileStream _videoFile;
+
+    public void StartRecording(string videoPath, long estimatedSize)
+    {
+        _videoFile = new FileStream(videoPath, FileMode.Create, FileAccess.Write);
+        _videoFile.SetLength(estimatedSize);
+        _videoFile.Position = 0;
+    }
+
+    public void WriteFrame(byte[] frameData)
+    {
+        _videoFile.Write(frameData, 0, frameData.Length);
+    }
+}
+```
+
+**Results**:
+
+- **Bad**: latency spikes (1–10 ms), dropped frames during recording
+- **Good**: consistent write latency (<1 ms), fewer/zero dropped frames
+
+#### Scenario 3: Log file rotation
+
+**Problem**: Daily logs grow to ~1 GB; without preallocation logs fragment, making later reads/analysis slower.
+
+```csharp
+// ❌ Bad: No preallocation (fragmented logs)
+public class LoggerWithoutPreallocation
+{
+    private FileStream _logFile;
+
+    public void RotateLog(string logPath)
+    {
+        _logFile?.Dispose();
+        _logFile = new FileStream(logPath, FileMode.Create, FileAccess.Write);
+    }
+
+    public void Log(string message)
+    {
+        byte[] data = Encoding.UTF8.GetBytes($"{DateTime.UtcNow:O} {message}\n");
+        _logFile.Write(data, 0, data.Length);
+    }
+}
+
+// ✅ Good: Preallocate log file (contiguous)
+public class LoggerWithPreallocation
+{
+    private FileStream _logFile;
+
+    public void RotateLog(string logPath)
+    {
+        _logFile?.Dispose();
+        _logFile = new FileStream(logPath, FileMode.Create, FileAccess.Write);
+        _logFile.SetLength(1024L * 1024 * 1024); // 1 GB estimated daily size
+        _logFile.Position = 0;
+    }
+
+    public void Log(string message)
+    {
+        byte[] data = Encoding.UTF8.GetBytes($"{DateTime.UtcNow:O} {message}\n");
+        _logFile.Write(data, 0, data.Length);
+    }
+}
+```
+
+**Results**:
+
+- **Bad**: 100+ extents, reading full log takes ~15s (HDD)
+- **Good**: ~1 extent, reading full log takes ~5s (HDD)
+- **Improvement**: ~3× faster log reads (analysis/archival)
+
+---
+
+## Balance Compression vs I/O Cost: Compress Only When I/O is the Bottleneck
+
+Compression is a performance trade-off, not a free win. You exchange CPU time (to compress/decompress) for fewer bytes to read/write. When your system is **I/O-bound** (waiting on slow disks, network, or remote storage), compression can improve throughput by 2×–10× and reduce tail latency because you transfer fewer bytes. When your system is **CPU-bound** (cores saturated, high request rate), compression can reduce throughput by 2×–5× and worsen p99 latency because you add CPU work to the critical path.
+
+### The compression trade-off
+
+Compression reduces the number of bytes you need to read/write, but it requires CPU work to compress and decompress the data. This creates a fundamental trade-off:
+
+- **Time saved**: Less I/O time (fewer bytes to transfer)
+- **Time spent**: More CPU time (compression/decompression overhead)
+
+**Real-world example: API response compression**
+
+Imagine a REST API that returns JSON responses:
+
+1. **Without compression**:
+   - Response size: 100 KB
+   - Network transfer time (10 MB/s link): 10 ms
+   - CPU time to serialize JSON: 1 ms
+   - **Total: 11 ms**
+
+2. **With compression** (5× compression ratio):
+   - Response size: 20 KB (compressed)
+   - Compression CPU time: 5 ms
+   - Network transfer time (10 MB/s link): 2 ms
+   - **Total: 1 ms (serialize) + 5 ms (compress) + 2 ms (network) = 8 ms**
+   - **Result: 3 ms faster (27% improvement)**
+
+3. **With compression on fast network** (100 MB/s LAN):
+   - Response size: 20 KB (compressed)
+   - Compression CPU time: 5 ms
+   - Network transfer time (100 MB/s link): 0.2 ms
+   - **Total: 1 ms + 5 ms + 0.2 ms = 6.2 ms**
+   - **Without compression: 1 ms + 1 ms = 2 ms**
+   - **Result: 4.2 ms slower (3× worse!)**
+
+**Why this matters**: Compression only helps when the **time saved on I/O** is greater than the **time spent on CPU**. If I/O is fast (local disk, fast network), compression can make things slower.
+
+### Key terms
+
+**What is I/O-bound?** A system is I/O-bound when it spends most of its time waiting for data to be read from or written to disk/network. Symptoms: Low CPU utilization (<50%), high disk queue depth, high network latency, threads blocked in I/O wait states.
+
+**What is CPU-bound?** A system is CPU-bound when it spends most of its time executing instructions. Symptoms: High CPU utilization (>80%), run queue length > number of cores, high p99 latency due to queueing, CPU throttling.
+
+**What is compression ratio?** The ratio of original size to compressed size. Example: 100 MB → 20 MB is a 5× compression ratio. Text, JSON, CSV, and logs typically compress 3×–10×. Images (JPEG, PNG), videos, and encrypted data typically compress <1.2× (sometimes bigger due to overhead).
+
+**What is a codec?** The compression algorithm. Examples:
+- **Gzip/Deflate**: Standard compression, good ratio (3×–5×), moderate CPU cost
+- **Brotli**: Better ratio (4×–6×), higher CPU cost, used for HTTP compression
+- **LZ4**: Very fast compression (~500 MB/s), lower ratio (2×–3×), used for real-time systems
+- **Zstd**: Configurable speed/ratio trade-off, popular for databases and file systems
+
+**What is compression level?** Most codecs have multiple levels (e.g., `CompressionLevel.Fastest`, `CompressionLevel.Optimal` in .NET). Higher levels = better ratio but more CPU time. Example: Gzip level 1 (fastest) compresses at ~100 MB/s with 3× ratio, level 9 (best) compresses at ~10 MB/s with 4× ratio.
+
+### Understanding the performance model
+
+**How compression affects total time:**
+
+For an I/O operation (read or write), total time is:
+
+```
+Total time = CPU time + I/O time
+```
+
+**Without compression:**
+```
+CPU time = serialization/deserialization only
+I/O time = bytes / I/O bandwidth
+Total = (bytes / CPU speed) + (bytes / I/O bandwidth)
+```
+
+**With compression:**
+```
+CPU time = serialization + compression
+I/O time = compressed bytes / I/O bandwidth
+Total = (bytes / CPU speed) + (bytes / compression speed) + (compressed bytes / I/O bandwidth)
+```
+
+**Compression improves performance when:**
+```
+(bytes / I/O bandwidth) > (bytes / compression speed) + (compressed bytes / I/O bandwidth)
+```
+
+Simplifying:
+```
+I/O bandwidth < compression speed × (compression ratio - 1)
+```
+
+**Example: When does Gzip compression help?**
+
+Assume:
+- Compression speed: 100 MB/s
+- Compression ratio: 4×
+- I/O bandwidth: ?
+
+Compression helps when:
+```
+I/O bandwidth < 100 MB/s × (4 - 1) = 300 MB/s
+```
+
+So Gzip compression helps when I/O is slower than 300 MB/s. For reference:
+- HDD: ~100 MB/s → compression helps
+- SATA SSD: ~500 MB/s → compression might hurt
+- NVMe SSD: ~3000 MB/s → compression hurts
+- 1 Gbps network: ~125 MB/s → compression helps
+- 10 Gbps network: ~1250 MB/s → compression might hurt
+
+### How compression works in .NET
+
+**What happens when you use `GZipStream`:**
+
+```csharp
+using var file = File.Create("data.txt.gz");
+using var gzip = new GZipStream(file, CompressionLevel.Optimal);
+using var writer = new StreamWriter(gzip);
+writer.Write(largeText);  // What happens here?
+```
+
+1. **`writer.Write(largeText)`** converts the string to bytes (UTF-8 encoding)
+2. **`gzip` compresses** the bytes in chunks (default: 8 KB buffer)
+   - Uses Deflate algorithm (LZ77 + Huffman coding)
+   - Compression runs on the calling thread (synchronous CPU work)
+   - For `CompressionLevel.Optimal`: ~10–20 MB/s compression speed
+   - For `CompressionLevel.Fastest`: ~100–200 MB/s compression speed
+3. **`file.Write()`** writes compressed bytes to disk
+
+**CPU cost breakdown:**
+- String → bytes (UTF-8 encoding): ~500 MB/s
+- Compression (Optimal): ~10–20 MB/s ← **This is the expensive part**
+- File write (buffered): ~1 µs per syscall
+
+For a 10 MB text file with 4× compression ratio:
+- Without compression: 10 MB / 500 MB/s = 20 ms (encoding) + disk I/O
+- With compression: 10 MB / 20 MB/s = 500 ms (encoding + compression) + disk I/O
+- **Compression adds 480 ms of CPU time**
+
+If disk I/O is slow (e.g., network storage at 10 MB/s):
+- Without compression: 20 ms + 10 MB / 10 MB/s = 1020 ms
+- With compression: 500 ms + 2.5 MB / 10 MB/s = 750 ms
+- **Net win: 270 ms saved (26% faster)**
+
+If disk I/O is fast (e.g., NVMe at 3000 MB/s):
+- Without compression: 20 ms + 10 MB / 3000 MB/s = 23 ms
+- With compression: 500 ms + 2.5 MB / 3000 MB/s = 501 ms
+- **Net loss: 478 ms wasted (22× slower!)**
+
+### Why this becomes a bottleneck
+
+Compression becomes a bottleneck when:
+
+- **CPU saturation**: Compression runs on request threads and competes with application logic. If CPU is already at 80%+, adding compression pushes it to 100% and causes queueing delays.
+- **Serialization point**: A single compression stream per file/connection forces sequential processing.
+- **Allocation pressure**: Compression allocates temporary buffers (e.g., 8 KB chunks in `GZipStream`). High request rates can increase GC pressure.
+- **Wrong codec/level choice**: Using `CompressionLevel.Optimal` on the request path can reduce throughput by 5×–10× compared to `CompressionLevel.Fastest`.
+- **Small payload overhead**: For payloads <1 KB, compressed size can be larger than original.
+
+### When to use compression
+
+Use compression when:
+
+- **Network/remote storage is the bottleneck** (cloud object storage, cross-region replication, slow WAN links). Example: Uploading logs to S3, replicating data across regions.
+- **Data compresses well** (JSON, CSV, XML, logs, text, repetitive data). Example: Application logs (5×–10× compression), JSON API responses (3×–5×).
+- **Workload is offline/batch** (ETL, backups, archival) where CPU time is cheaper than I/O time. Example: Daily log compression, database backups.
+- **You can move compression off the hot path** (background workers, async pipelines). Example: Compress data asynchronously after write.
+- **Storage cost matters** (long-term retention, egress charges). Example: Compressed backups, compressed archives.
+
+### When NOT to use compression
+
+Avoid compression when:
+
+- **CPU is already saturated** (>80% utilization on request path). Example: Hot API endpoints with high request rate.
+- **Payloads are already compressed** (images, videos, encrypted data). Example: JPEG images, H.264 videos, TLS-encrypted traffic.
+- **Payloads are small** (<1 KB) where overhead dominates. Example: Small JSON responses, tiny cache entries.
+- **You need random access** inside files. Example: Database index files, seekable log files.
+- **Latency budget is tight** (<10 ms) and compression sits on the critical path. Example: Real-time trading systems, game servers.
+- **I/O is already fast** (local NVMe, RAM disk, fast LAN). Example: Local file operations, in-process IPC.
+
+### Example scenarios
+
+#### Scenario 1: Log file compression before uploading to S3
+
+**Problem**: Application generates 10 GB of logs per day. Uploading to S3 takes 30 minutes (10 MB/s upload speed).
+
+```csharp
+// ❌ Bad: Upload uncompressed logs (slow, expensive)
+public async Task UploadLogsAsync(string logPath, string s3Key)
+{
+    using var file = File.OpenRead(logPath);  // 10 GB
+    await s3Client.PutObjectAsync(new PutObjectRequest
+    {
+        BucketName = "my-logs",
+        Key = s3Key,
+        InputStream = file
+    });
+    // Upload time: 10 GB / 10 MB/s = 1000 seconds (16 minutes)
+    // S3 storage cost: 10 GB × $0.023/GB/month = $0.23/month
+}
+
+// ✅ Good: Compress logs before uploading (fast, cheap)
+public async Task UploadCompressedLogsAsync(string logPath, string s3Key)
+{
+    using var inputFile = File.OpenRead(logPath);  // 10 GB
+    using var compressed = new MemoryStream();
+    using (var gzip = new GZipStream(compressed, CompressionLevel.Optimal, leaveOpen: true))
+    {
+        await inputFile.CopyToAsync(gzip);
+    }
+    compressed.Position = 0;
+    
+    await s3Client.PutObjectAsync(new PutObjectRequest
+    {
+        BucketName = "my-logs",
+        Key = s3Key + ".gz",
+        InputStream = compressed
+    });
+    // Compression time: 10 GB / 20 MB/s = 500 seconds (8 minutes)
+    // Compressed size: 10 GB / 5 = 2 GB (5× compression ratio)
+    // Upload time: 2 GB / 10 MB/s = 200 seconds (3 minutes)
+    // Total time: 500 + 200 = 700 seconds (11 minutes)
+    // S3 storage cost: 2 GB × $0.023/GB/month = $0.046/month
+}
+```
+
+**Results**:
+- **Bad**: 16 minutes upload, $0.23/month storage
+- **Good**: 11 minutes total (8 compress + 3 upload), $0.046/month storage
+- **Improvement**: 1.5× faster, 5× cheaper storage
+
+#### Scenario 2: API response compression (when to avoid)
+
+**Problem**: REST API serves JSON responses (average 50 KB). Server CPU is at 85% utilization. Adding `Content-Encoding: gzip` seems like a good idea to reduce bandwidth.
+
+**Analysis**:
+- Response size: 50 KB
+- Network bandwidth: 1 Gbps LAN (~125 MB/s)
+- Compression ratio: 4× (JSON compresses well)
+- Compression speed: 20 MB/s (`CompressionLevel.Optimal`)
+
+Without compression:
+- CPU time: 1 ms (serialize JSON)
+- Network time: 50 KB / 125 MB/s = 0.4 ms
+- Total: 1.4 ms per request
+
+With compression:
+- CPU time: 1 ms (serialize) + 50 KB / 20 MB/s = 1 ms + 2.5 ms = 3.5 ms
+- Network time: 12.5 KB / 125 MB/s = 0.1 ms
+- Total: 3.6 ms per request
+
+**Result**: Compression makes requests 2.5× slower. CPU is already saturated, adding compression reduces throughput by 60% (from 1000 req/sec to 400 req/sec).
+
+**Solution**: Don't compress. Or use `CompressionLevel.Fastest` (~100 MB/s) which adds only 0.5 ms CPU time, making total time 2 ms (still 40% slower but acceptable).
+
+### Key takeaways
+
+- Compression trades **CPU for reduced bytes**
+- **I/O-bound workloads**: compression can improve throughput by 2×–10× and reduce latency
+- **CPU-bound workloads**: compression can reduce throughput by 2×–5× and worsen p99 latency
+- **Decision rule**: measure your actual bottleneck (CPU vs I/O), measure compressibility, measure CPU cost
+- **Use fast compression** (`CompressionLevel.Fastest`) on hot request paths
+- **Use higher ratios** (`CompressionLevel.Optimal`) for offline batch jobs
+- **No compression** when CPU is the bottleneck or data doesn't compress well
+- **Always validate** with end-to-end metrics (CPU%, throughput, p95/p99) under realistic load
+- **Common mistake**: compressing everything at `Optimal` level on the hot path
+- **Gzip compression helps** when I/O is slower than ~300 MB/s (for typical 4× ratio, 100 MB/s compress speed)
+
+---
+
+## Reduce Filesystem Metadata Operations to Improve I/O Performance
+
+Filesystem metadata operations (creating files, checking existence, changing permissions, deleting files) are expensive—often 10×–100× slower than reading/writing data. Reducing these operations by reusing file handles, batching operations, and consolidating files can improve throughput by 10×–50× and reduce latency by 5×–20×.
+
+### What are filesystem metadata operations?
+
+Filesystem metadata operations are operations that modify or query information about files (not the file data itself). Examples:
+
+- **Creating a file** (`File.Create()`, `File.WriteAllText()`): Allocates inode, updates directory, initializes metadata
+- **Checking file existence** (`File.Exists()`): Searches directory, reads inode
+- **Deleting a file** (`File.Delete()`): Updates directory, marks inode free, updates allocation tables
+- **Getting file info** (`FileInfo`, `stat()`): Reads inode, directory entry
+- **Changing permissions** (`chmod()`): Updates inode permissions
+- **Renaming/moving files** (`File.Move()`): Updates directory entries (source and destination)
+
+**Real-world example: High-volume logging**
+
+Imagine a logging system that creates one file per log entry:
+
+```csharp
+// ❌ Bad: Create a new file for every log entry
+public class BadLogger
+{
+    public void Log(string message)
+    {
+        var fileName = $"logs/{DateTime.UtcNow:yyyy-MM-dd}/{Guid.NewGuid()}.log";
+        File.WriteAllText(fileName, message);  // Creates file, writes, closes
+    }
+}
+```
+
+**What happens for each log entry:**
+1. **Directory lookup**: Find `logs/` directory (read directory inode)
+2. **Directory lookup**: Find `2025-01-22/` subdirectory (read subdirectory inode)
+3. **Allocate inode**: Find free inode in filesystem
+4. **Create directory entry**: Add filename → inode mapping to directory
+5. **Initialize inode**: Set permissions, timestamps, size = 0
+6. **Write data**: Write log message to file
+7. **Update inode**: Update size, modification time
+8. **Close file**: Flush buffers, release file descriptor
+
+**Cost per log entry:**
+- HDD: ~10–50 ms (multiple seeks for directory lookups + inode allocation)
+- SSD: ~0.5–2 ms (faster, but still expensive)
+- **For 10,000 logs/sec**: 10,000 × 2 ms = 20 seconds of pure metadata overhead!
+
+### Key terms
+
+**What is an inode?** A data structure that stores metadata about a file: size, permissions, timestamps, owner, and pointers to data blocks. Each file has one inode. Creating a file requires allocating an inode, which involves searching the filesystem's inode table and updating allocation bitmaps.
+
+**What is a directory entry?** A mapping from filename to inode number. Directories are special files that contain directory entries. Creating a file requires adding a directory entry, which involves reading the directory, searching for free space, and writing the new entry.
+
+**What is `File.Exists()`?** A method that checks if a file exists. Internally, it calls `stat()` which:
+1. Resolves the file path (traverses directory hierarchy)
+2. Searches the directory for the filename
+3. Reads the inode if found
+4. Returns true/false
+
+This costs 0.1–10 ms (HDD) or 0.01–1 ms (SSD) per call.
+
+**What is a file handle (file descriptor)?** An open reference to a file. Once a file is open, you can read/write without additional metadata operations. Reusing an open file handle avoids the cost of opening/closing files repeatedly.
+
+**What is directory traversal?** The process of resolving a file path like `logs/2025-01-22/abc.log`. The filesystem must:
+1. Open root directory (`/`)
+2. Search for `logs` entry
+3. Open `logs` directory
+4. Search for `2025-01-22` entry
+5. Open `2025-01-22` directory
+6. Search for `abc.log` entry
+
+Each step requires reading a directory and searching entries. This is slow when repeated thousands of times.
+
+### How it works
+
+**What happens when you create a file:**
+
+```csharp
+File.WriteAllText("data.txt", "Hello");
+```
+
+1. **Path resolution** (for `data.txt`):
+   - Open current directory inode
+   - Search directory for `data.txt` (not found, will create)
+   - **Cost: 0.1–1 ms** (directory read + search)
+
+2. **Allocate inode**:
+   - Search filesystem's inode allocation bitmap/B-tree for free inode
+   - Mark inode as allocated
+   - **Cost: 0.1–5 ms** (HDD: seek to inode table, SSD: metadata read)
+
+3. **Create directory entry**:
+   - Read directory data
+   - Find free slot in directory
+   - Write `data.txt → inode_number` entry
+   - Update directory inode (size, mtime)
+   - **Cost: 0.1–2 ms** (directory read + write)
+
+4. **Initialize inode**:
+   - Write inode metadata (size=0, permissions, timestamps, owner)
+   - **Cost: 0.1–1 ms** (inode write)
+
+5. **Write data**:
+   - Write "Hello" to data blocks
+   - Update inode (size=5, mtime)
+   - **Cost: 0.01–0.1 ms** (data write, fast)
+
+6. **Close file**:
+   - Flush buffers
+   - Release file descriptor
+   - **Cost: 0.01–0.1 ms**
+
+**Total cost: 0.5–10 ms per file creation** (HDD: 5–10 ms, SSD: 0.5–2 ms)
+
+**What happens when you check file existence:**
+
+```csharp
+if (File.Exists("data.txt"))
+{
+    // ...
+}
+```
+
+1. **Path resolution**: Traverse directory hierarchy
+2. **Directory search**: Search directory for `data.txt`
+3. **Inode read**: Read inode if found
+4. **Return**: true if found, false otherwise
+
+**Total cost: 0.1–10 ms per check** (HDD: 1–10 ms, SSD: 0.1–1 ms)
+
+### Strategies to reduce metadata operations
+
+**Strategy 1: Reuse file handles**
+
+Instead of creating a new file for each write, open a file once and append to it:
+
+```csharp
+// ❌ Bad: Create new file for each write (expensive metadata operations)
+public class BadFileWriter
+{
+    public void WriteData(string data)
+    {
+        var fileName = $"data_{DateTime.UtcNow.Ticks}.txt";
+        File.WriteAllText(fileName, data);  // Creates file, writes, closes
+        // Cost: 0.5–10 ms per write (metadata overhead)
+    }
+}
+
+// ✅ Good: Reuse open file handle (no metadata operations after first open)
+public class GoodFileWriter
+{
+    private FileStream _file;
+    private StreamWriter _writer;
+
+    public GoodFileWriter(string path)
+    {
+        _file = File.Open(path, FileMode.Append, FileAccess.Write);
+        _writer = new StreamWriter(_file);
+    }
+
+    public void WriteData(string data)
+    {
+        _writer.WriteLine(data);  // Just writes data, no metadata operations
+        // Cost: 0.01–0.1 ms per write (data write only)
+    }
+
+    public void Dispose()
+    {
+        _writer?.Dispose();
+        _file?.Dispose();
+    }
+}
+```
+
+**Performance improvement:**
+- **Bad**: 10,000 writes × 2 ms = 20 seconds (metadata overhead)
+- **Good**: 1 open (2 ms) + 10,000 writes × 0.05 ms = 0.5 seconds
+- **Improvement: 40× faster**
+
+**Strategy 2: Batch file operations**
+
+Instead of checking file existence before every write, batch the checks:
+
+```csharp
+// ❌ Bad: Check existence before every write
+public class BadFileChecker
+{
+    public void WriteIfNotExists(string path, string data)
+    {
+        if (!File.Exists(path))  // Metadata operation: 0.1–10 ms
+        {
+            File.WriteAllText(path, data);  // More metadata operations
+        }
+    }
+}
+
+// ✅ Good: Check once, cache result
+public class GoodFileChecker
+{
+    private readonly HashSet<string> _knownFiles = new HashSet<string>();
+
+    public void WriteIfNotExists(string path, string data)
+    {
+        if (!_knownFiles.Contains(path))  // In-memory check: <0.001 ms
+        {
+            if (!File.Exists(path))  // Check only once
+            {
+                File.WriteAllText(path, data);
+                _knownFiles.Add(path);
+            }
+        }
+    }
+}
+```
+
+**Strategy 3: Consolidate many small files into fewer large files**
+
+Instead of creating one file per record, append to a single file:
+
+```csharp
+// ❌ Bad: One file per record (many metadata operations)
+public class BadRecordWriter
+{
+    public void WriteRecord(Record record)
+    {
+        var fileName = $"records/{record.Id}.json";
+        File.WriteAllText(fileName, JsonSerializer.Serialize(record));
+        // Cost: 0.5–10 ms per record (file creation overhead)
+    }
+}
+
+// ✅ Good: Append to single file (one metadata operation total)
+public class GoodRecordWriter
+{
+    private readonly StreamWriter _writer;
+
+    public GoodRecordWriter(string path)
+    {
+        _writer = new StreamWriter(path, append: true);
+    }
+
+    public void WriteRecord(Record record)
+    {
+        _writer.WriteLine(JsonSerializer.Serialize(record));
+        // Cost: 0.01–0.1 ms per record (data write only)
+    }
+}
+```
+
+**Performance improvement:**
+- **Bad**: 10,000 records × 2 ms = 20 seconds
+- **Good**: 1 open (2 ms) + 10,000 writes × 0.05 ms = 0.5 seconds
+- **Improvement: 40× faster**
+
+### Why this becomes a bottleneck
+
+Metadata operations become a bottleneck because:
+
+- **Fixed overhead per operation**: Each metadata operation has a fixed cost (0.1–10 ms) regardless of data size. Creating a 1-byte file costs the same as creating a 1-MB file in terms of metadata overhead.
+- **Cumulative cost**: When you perform thousands of metadata operations, the cumulative cost dominates. Example: 10,000 file creations × 2 ms = 20 seconds of pure overhead.
+- **Directory lookup cost**: As directories grow, searching them becomes slower. Large directories (>10,000 entries) can take 10×–100× longer to search than small directories.
+- **Inode allocation contention**: When many threads create files simultaneously, they compete for inode allocation, causing lock contention and queueing delays.
+- **Filesystem journal overhead**: Many filesystems (ext4, NTFS) use journaling for metadata operations. Each metadata operation requires journal writes, doubling the I/O cost.
+
+### Example scenarios
+
+#### Scenario 1: High-volume logging (reuse file handle)
+
+**Problem**: A logging system writes 10,000 log entries per second. Creating a new file for each entry limits throughput to 500–1000 entries/sec due to metadata overhead.
+
+```csharp
+// ❌ Bad: Create file for every log entry
+public class BadLogger
+{
+    public void Log(string message)
+    {
+        var fileName = $"logs/{DateTime.UtcNow:yyyy-MM-dd}/{Guid.NewGuid()}.log";
+        File.WriteAllText(fileName, $"{DateTime.UtcNow:O} {message}");
+        // Cost: 2 ms per log entry (metadata overhead)
+    }
+}
+
+// ✅ Good: Reuse file handle, append to single file
+public class GoodLogger
+{
+    private StreamWriter _writer;
+    private string _currentDate;
+
+    public void Log(string message)
+    {
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+        
+        // Only open new file if date changed
+        if (_writer == null || _currentDate != today)
+        {
+            _writer?.Dispose();
+            var path = $"logs/{today}.log";
+            _writer = new StreamWriter(path, append: true);
+            _currentDate = today;
+        }
+        
+        _writer.WriteLine($"{DateTime.UtcNow:O} {message}");
+        // Cost: 0.05 ms per log entry (data write only)
+    }
+}
+```
+
+**Results**:
+- **Bad**: 500–1000 logs/sec (limited by metadata operations)
+- **Good**: 10,000+ logs/sec (limited by data write speed)
+- **Improvement**: 10×–20× faster
+
+#### Scenario 2: Batch file processing (check existence once)
+
+**Problem**: A batch job processes 10,000 files. Checking `File.Exists()` before processing each file adds 10 seconds of overhead.
+
+```csharp
+// ❌ Bad: Check existence for every file
+public void ProcessFiles(List<string> filePaths)
+{
+    foreach (var path in filePaths)
+    {
+        if (File.Exists(path))  // Metadata operation: 1 ms per check
+        {
+            ProcessFile(path);
+        }
+    }
+    // Total: 10,000 × 1 ms = 10 seconds of overhead
+}
+
+// ✅ Good: Use try-catch instead of existence check
+public void ProcessFiles(List<string> filePaths)
+{
+    foreach (var path in filePaths)
+    {
+        try
+        {
+            ProcessFile(path);  // File.OpenRead() will throw if file doesn't exist
+        }
+        catch (FileNotFoundException)
+        {
+            // File doesn't exist, skip
+        }
+    }
+    // Total: Only pay cost when file doesn't exist (rare case)
+}
+```
+
+**Results**:
+- **Bad**: 10 seconds overhead (10,000 existence checks)
+- **Good**: <0.1 seconds overhead (only when files don't exist)
+- **Improvement**: 100× faster
+
+#### Scenario 3: Data ingestion (consolidate files)
+
+**Problem**: An IoT system ingests sensor data (1000 messages/sec) and stores each message in a separate file. This creates 86.4 million files per day and causes filesystem exhaustion.
+
+```csharp
+// ❌ Bad: One file per message
+public class BadDataIngestion
+{
+    public void StoreMessage(SensorMessage message)
+    {
+        var fileName = $"data/{message.SensorId}/{message.Timestamp}.json";
+        Directory.CreateDirectory(Path.GetDirectoryName(fileName));
+        File.WriteAllText(fileName, JsonSerializer.Serialize(message));
+        // Cost: 2 ms per message (file creation overhead)
+    }
+}
+
+// ✅ Good: Consolidate into hourly files
+public class GoodDataIngestion
+{
+    private readonly Dictionary<string, StreamWriter> _writers = new();
+    private readonly object _lock = new object();
+
+    public void StoreMessage(SensorMessage message)
+    {
+        var hour = message.Timestamp.ToString("yyyy-MM-dd-HH");
+        var key = $"{message.SensorId}/{hour}";
+        
+        lock (_lock)
+        {
+            if (!_writers.TryGetValue(key, out var writer))
+            {
+                var path = $"data/{key}.jsonl";
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                writer = new StreamWriter(path, append: true);
+                _writers[key] = writer;
+            }
+            
+            writer.WriteLine(JsonSerializer.Serialize(message));
+        }
+        // Cost: 0.05 ms per message (data write only)
+    }
+}
+```
+
+**Results**:
+- **Bad**: 86.4M files/day, 2 ms per message, filesystem exhaustion
+- **Good**: 24 files/day per sensor, 0.05 ms per message, manageable
+- **Improvement**: 40× faster, 3.6M× fewer files
+---

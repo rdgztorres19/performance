@@ -3192,7 +3192,7 @@ public class MemoryMappedFileAccess
 
 ---
 
-### Avoid frequent fsync calls
+### Avoid frequent fsync calls (Ok)
 
 **Cómo funciona:**
 fsync fuerza que los datos en caché del sistema operativo se escriban al disco. Esto es costoso y hacerlo frecuentemente degrada el rendimiento significativamente.
@@ -3266,7 +3266,7 @@ public void WriteDataOptimized(string filePath, IEnumerable<string> data)
 
 ---
 
-### Avoid many small files
+### Avoid many small files (OK)
 
 **Cómo funciona:**
 Tener muchos archivos pequeños aumenta el overhead de metadatos del filesystem y puede causar fragmentación, degradando el rendimiento.
@@ -3337,7 +3337,7 @@ public class BestManyFiles
 
 ---
 
-### Preallocate files
+### Preallocate files (Ok)
 
 **Cómo funciona:**
 Pre-asignar espacio para archivos evita la fragmentación y mejora el rendimiento al asegurar que el archivo tenga espacio contiguo en el disco.
@@ -3390,7 +3390,7 @@ public class PreallocateFile
 
 ---
 
-### Balance compression versus IO cost
+### Balance compression versus IO cost (Ok)
 
 **Cómo funciona:**
 La compresión reduce el tamaño de datos pero aumenta el uso de CPU. El balance depende de si el cuello de botella es I/O o CPU.
