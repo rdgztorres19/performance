@@ -6332,3 +6332,294 @@ public class GoodDataIngestion
 - **Good**: 24 files/day per sensor, 0.05 ms per message, manageable
 - **Improvement**: 40× faster, 3.6M× fewer files
 ---
+
+## Stream Files Instead of Loading Entire Files into Memory
+
+Loading entire files into memory requires allocating RAM equal to the file size. For a 1 GB file, you need 1 GB of free RAM. This causes `OutOfMemoryException` when files exceed available memory, increases GC pressure (large allocations trigger full GC), and wastes memory (you might only need to process a small portion). Streaming files (using `StreamReader`, `FileStream`, or `System.IO.Pipelines`) reads data in small chunks (e.g., 4–64 KB buffers), processing incrementally with constant memory usage. This enables processing files of any size (even larger than RAM), reduces GC pressure (smaller allocations), and improves memory efficiency.
+
+### Key terms
+
+**What is streaming?** Reading/writing data incrementally in small chunks (buffers) rather than loading everything into memory at once. Example: Reading a 1 GB file in 64 KB chunks uses only 64 KB of RAM, not 1 GB.
+
+**What is a buffer?** A small chunk of memory (typically 4–64 KB) used to hold data temporarily during I/O operations. Streams read data into buffers, process it, then read the next chunk.
+
+**What is `System.IO.Pipelines`?** A high-performance streaming API in .NET that uses producer-consumer pattern with backpressure. It's optimized for zero-copy scenarios and async I/O, providing better performance than `StreamReader` for high-throughput scenarios.
+
+**What is backpressure?** A mechanism where the consumer (reader) signals the producer (writer) to slow down when the consumer can't keep up. `System.IO.Pipelines` implements backpressure automatically to prevent memory buildup.
+
+### Common misconceptions
+
+**"Streaming is always slower than loading everything"**
+- **The truth**: For large files (>100 MB), streaming is often faster because it starts processing immediately (no wait for entire file to load) and avoids GC pauses. For small files (<1 MB), loading everything can be faster due to fewer syscalls.
+
+**"Memory is cheap, so loading large files is fine"**
+- **The truth**: Even with plenty of RAM, loading large files causes GC pressure (full GC pauses), wastes memory (you might only need a small portion), and increases risk of OOM in production (memory fragmentation, other processes).
+
+### How it works
+
+**How `File.ReadAllText()` works (load entire file):**
+
+```csharp
+var content = File.ReadAllText("large-file.txt");
+```
+
+1. **Allocate string**: Allocate a string buffer equal to file size (e.g., 1 GB)
+2. **Read entire file**: Read all 1 GB from disk into the string (synchronous, blocks until complete)
+3. **Return string**: Return the entire string
+4. **Memory usage**: 1 GB RAM (plus disk cache)
+
+**Timeline:**
+- **0 ms**: Start reading
+- **1000 ms**: Still reading (file is 1 GB, disk is 100 MB/s)
+- **10000 ms**: Finished reading, return string
+- **10000 ms**: Start processing (only now!)
+
+**How `StreamReader` works (streaming):**
+
+```csharp
+using var reader = new StreamReader("large-file.txt");
+string line;
+while ((line = reader.ReadLine()) != null)
+{
+    ProcessLine(line);
+}
+```
+
+1. **Open file**: Open file handle (no data read yet)
+2. **Read buffer**: Read first chunk (e.g., 4 KB) into internal buffer
+3. **Process line**: Extract first line from buffer, process it
+4. **Read next chunk**: If buffer is empty, read next 4 KB from disk
+5. **Repeat**: Continue until end of file
+
+**Timeline:**
+- **0 ms**: Start reading first chunk
+- **0.04 ms**: First chunk read (4 KB / 100 MB/s)
+- **0.04 ms**: Start processing first line (immediately!)
+- **0.08 ms**: Process second line (from same buffer)
+- **...**: Continue processing while reading in background
+
+**Key insight**: Streaming starts processing immediately (after first chunk), while loading entire file must wait for the entire file to be read.
+
+**What happens when you use `StreamReader`:**
+
+```csharp
+using var reader = new StreamReader("large-file.txt");
+string line = reader.ReadLine();  // What happens here?
+```
+
+1. **`StreamReader` constructor**:
+   - Opens file handle (`FileStream`)
+   - Allocates internal buffer (default: 1 KB for `StreamReader`, 4 KB for underlying `FileStream`)
+   - **Memory usage: ~5 KB** (buffer + object overhead)
+
+2. **`ReadLine()` call**:
+   - Checks if buffer has a complete line
+   - If not, reads more data from disk into buffer (async if `ReadLineAsync()`)
+   - Extracts line from buffer (creates new string)
+   - Returns line
+   - **Memory usage: ~5 KB + line size** (typically <1 KB per line)
+
+3. **Next `ReadLine()` call**:
+   - Reuses same buffer (no new allocation)
+   - Reads next chunk if needed
+   - **Memory usage: constant** (~5 KB)
+
+**What happens when you use `System.IO.Pipelines`:**
+
+```csharp
+var pipe = new Pipe();
+var writer = pipe.Writer;
+var reader = pipe.Reader;
+
+// Producer: Read from file, write to pipe
+await FillPipeAsync(filePath, writer);
+
+// Consumer: Read from pipe, process data
+await ReadPipeAsync(reader);
+```
+
+1. **Pipe creation**:
+   - Creates a buffer pool (reusable buffers)
+   - Sets up producer-consumer communication
+   - **Memory usage: ~64 KB** (initial buffer pool)
+
+2. **Producer (`FillPipeAsync`)**:
+   - Reads from file in chunks (e.g., 4 KB)
+   - Writes to pipe buffer
+   - If consumer is slow, backpressure pauses producer (prevents memory buildup)
+
+3. **Consumer (`ReadPipeAsync`)**:
+   - Reads from pipe buffer
+   - Processes data
+   - Returns buffer to pool when done (zero-copy, no allocations)
+
+**Why `System.IO.Pipelines` is faster:**
+- **Zero-copy**: Buffers are reused, not allocated per read
+- **Backpressure**: Automatically prevents memory buildup
+- **Async-optimized**: Better async/await performance than `StreamReader`
+- **Buffer pooling**: Reuses buffers instead of allocating new ones
+
+### Why this becomes a bottleneck
+
+Loading entire files becomes a bottleneck because:
+
+- **Memory exhaustion**: Files larger than available RAM cause `OutOfMemoryException`. Example: 10 GB file on a system with 8 GB RAM = crash.
+- **GC pressure**: Large allocations trigger full GC collections. Example: Allocating 1 GB string triggers full GC (100–1000 ms pause), making the application unresponsive.
+- **Wasted memory**: You might only need to process a small portion of the file, but loading everything wastes memory. Example: Searching for a specific line in a 10 GB file only needs that line, not the entire file.
+- **Slow startup**: Must read entire file before processing starts. Example: Processing a 10 GB file: 100 seconds to load + 10 seconds to process = 110 seconds total. Streaming: 0 seconds to start + 110 seconds processing = 110 seconds total, but processing starts immediately.
+- **Memory fragmentation**: Large allocations can fragment the heap, making future allocations slower and increasing risk of OOM.
+
+### Disadvantages and trade-offs
+
+- **Potentially slower for small files**: For files <1 MB, the overhead of buffer management and multiple syscalls can be slower than loading everything. Example: 100 KB file: `ReadAllText()` = 1 ms, `StreamReader` = 1.5 ms (50% slower).
+- **No random access**: Streaming is sequential. Can't jump to arbitrary positions without reading from the beginning. Example: Can't read line 1,000,000 without reading lines 1–999,999 first.
+
+### When to use streaming
+
+Use streaming when:
+
+- **Large files** (>100 MB). Example: Log files, database dumps, CSV files, JSON files. Streaming is essential for files larger than available RAM.
+- **Memory is constrained** (containers, embedded systems, mobile). Example: Docker containers with 512 MB RAM limit, processing 1 GB files.
+- **Processing can be incremental** (line-by-line, record-by-record). Example: Parsing logs, filtering data, transforming CSV rows.
+
+### Example scenarios
+
+#### Scenario 1: Processing large log files
+
+**Problem**: A log analysis tool processes 10 GB log files. Loading entire file causes `OutOfMemoryException` on systems with <10 GB RAM.
+
+```csharp
+// ❌ Bad: Load entire file into memory
+public void AnalyzeLogs(string logPath)
+{
+    var logs = File.ReadAllLines(logPath);  // 10 GB → OutOfMemoryException!
+    foreach (var log in logs)
+    {
+        if (IsErrorLog(log))
+        {
+            AnalyzeError(log);
+        }
+    }
+}
+
+// ✅ Good: Stream file line-by-line
+public void AnalyzeLogs(string logPath)
+{
+    using var reader = new StreamReader(logPath);
+    string line;
+    while ((line = reader.ReadLine()) != null)
+    {
+        if (IsErrorLog(line))
+        {
+            AnalyzeError(line);
+        }
+    }
+    // Memory usage: ~5 KB (buffer) instead of 10 GB
+}
+```
+
+**Results**:
+- **Bad**: `OutOfMemoryException` on systems with <10 GB RAM
+- **Good**: Works on any system, uses ~5 KB memory
+- **Improvement**: Can process files of any size
+
+#### Scenario 2: High-throughput CSV processing (use Pipelines)
+
+**Problem**: ETL pipeline processes 100 GB CSV files at 500 MB/s. Need maximum throughput with minimal memory.
+
+```csharp
+// ❌ Bad: Load entire file
+public void ProcessCsv(string csvPath)
+{
+    var lines = File.ReadAllLines(csvPath);  // 100 GB → OutOfMemoryException
+    foreach (var line in lines)
+    {
+        ProcessCsvRow(line);
+    }
+}
+
+// ✅ Good: Use System.IO.Pipelines for high throughput
+using System.IO.Pipelines;
+using System.Text;
+
+public async Task ProcessCsvAsync(string csvPath)
+{
+    var pipe = new Pipe();
+    var fillTask = FillPipeAsync(csvPath, pipe.Writer);
+    var readTask = ReadPipeAsync(pipe.Reader);
+    
+    await Task.WhenAll(fillTask, readTask);
+}
+
+private async Task FillPipeAsync(string filePath, PipeWriter writer)
+{
+    using var file = File.OpenRead(filePath);
+    
+    while (true)
+    {
+        var memory = writer.GetMemory(64 * 1024);  // 64 KB buffer
+        int bytesRead = await file.ReadAsync(memory);
+        
+        if (bytesRead == 0)
+            break;
+            
+        writer.Advance(bytesRead);
+        var result = await writer.FlushAsync();
+        
+        if (result.IsCompleted)
+            break;
+    }
+    
+    await writer.CompleteAsync();
+}
+
+private async Task ReadPipeAsync(PipeReader reader)
+{
+    while (true)
+    {
+        var result = await reader.ReadAsync();
+        var buffer = result.Buffer;
+        
+        // Process CSV lines from buffer
+        var position = ProcessBuffer(buffer);
+        
+        reader.AdvanceTo(position);
+        
+        if (result.IsCompleted)
+            break;
+    }
+    
+    await reader.CompleteAsync();
+}
+
+private SequencePosition ProcessBuffer(ReadOnlySequence<byte> buffer)
+{
+    var reader = new SequenceReader<byte>(buffer);
+    
+    while (reader.TryReadTo(out ReadOnlySpan<byte> line, (byte)'\n'))
+    {
+        var lineStr = Encoding.UTF8.GetString(line);
+        ProcessCsvRow(lineStr);
+    }
+    
+    return reader.Position;
+}
+```
+
+**Results**:
+- **Bad**: `OutOfMemoryException` for 100 GB file
+- **Good**: Processes 100 GB file with ~64 KB memory, high throughput (500 MB/s)
+- **Improvement**: Can process files of any size, zero-copy with buffer pooling
+
+### Key takeaways
+
+- **Memory usage**: 100×–10,000× lower (1 GB file: 1 GB → 64 KB = 16,000× less memory)
+- **Can process files larger than RAM**: Enables processing files 10×–1000× larger than available RAM
+- **GC pause reduction**: 50%–90% lower GC pause time (1 GB allocation triggers 1000 ms full GC, 64 KB allocations trigger 10 ms minor GC)
+- **Startup time**: Processing starts immediately (0 ms) vs after entire file loads (seconds to minutes)
+- **Use for**: Large files (>100 MB), memory-constrained environments, incremental processing
+- **Avoid when**: Small files (<1 MB), random access required, simplicity more important
+- **Common mistakes**: Using `File.ReadAllText()` for large files, not disposing streams, reading entire file when only portion needed
+- **For high-throughput**: Use `System.IO.Pipelines` instead of `StreamReader` for better performance
+
+---

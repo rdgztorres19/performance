@@ -3457,7 +3457,7 @@ public class CompressionExample
 
 ---
 
-### Reduce filesystem metadata operations
+### Reduce filesystem metadata operations (Ok)
 
 **Cómo funciona:**
 Las operaciones de metadatos (crear archivos, cambiar permisos, etc.) son costosas. Reducirlas mejora el rendimiento.
@@ -3519,7 +3519,7 @@ public class GoodMetadata
 
 Esta sección cubre optimizaciones para operaciones de archivo, críticas para aplicaciones que procesan archivos grandes o realizan mucho I/O.
 
-### Stream files instead of loading entire files into memory
+### Stream files instead of loading entire files into memory (Ok)
 
 **Cómo funciona:**
 En lugar de cargar un archivo completo en memoria, procesarlo como stream permite procesar archivos de cualquier tamaño sin limitaciones de memoria, procesando datos en chunks.
