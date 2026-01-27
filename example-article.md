@@ -1,82 +1,70 @@
-### Choose correct IO chunk sizes
+### Bulk read and write operations
 
 **Cómo funciona:**
-El tamaño del buffer usado para I/O afecta el rendimiento. Buffers muy pequeños causan muchas llamadas al sistema, mientras que buffers muy grandes pueden desperdiciar memoria.
+Leer y escribir en bloques grandes reduce el número de llamadas al sistema y mejora el rendimiento al aprovechar mejor el ancho de banda.
 
 **Ventajas:**
-- Mejor rendimiento de I/O
 - Menos llamadas al sistema
-- Mejor utilización de recursos
+- Mejor rendimiento
+- Mejor utilización del ancho de banda
+- Menor overhead
 
 **Desventajas:**
-- Requiere experimentación para encontrar el tamaño óptimo
-- Puede variar según el sistema
+- Requiere más memoria
+- Puede aumentar latencia
+- Requiere gestión de buffers
 
 **Cuándo usar:**
-- Siempre que se haga I/O
-- Operaciones de archivo frecuentes
-- Cuando el I/O es un cuello de botella
+- Siempre que sea posible
+- Operaciones de I/O frecuentes
+- Cuando el tamaño de datos lo permite
+- Aplicaciones de alto rendimiento
 
 **Impacto en performance:**
-Puede mejorar el rendimiento de I/O en un 20-50% al reducir el número de llamadas al sistema. El tamaño óptimo típicamente está entre 4KB y 64KB.
+Puede mejorar el rendimiento en un 5-20x para operaciones de I/O. El impacto es mayor con buffers más grandes.
 
 **Ejemplo en C#:**
 ```csharp
-// ❌ Malo: Buffer muy pequeño
-public class BadBufferSize
+// ❌ Malo: Operaciones pequeñas
+public class BadBulk
 {
-    public void ReadFile(string filePath)
+    public void WriteData(List<byte> data)
     {
-        var buffer = new byte[64]; // Muy pequeño, muchas llamadas
-        using (var file = File.OpenRead(filePath))
+        using (var file = File.Create("data.bin"))
         {
-            int bytesRead;
-            while ((bytesRead = file.Read(buffer, 0, buffer.Length)) > 0)
+            foreach (var byte in data)
             {
-                ProcessChunk(buffer, bytesRead);
+                file.WriteByte(byte); // Una llamada por byte
             }
         }
     }
 }
 
-// ✅ Bueno: Buffer de tamaño apropiado
-public class GoodBufferSize
+// ✅ Bueno: Operaciones en bulk
+public class GoodBulk
 {
-    private const int BufferSize = 65536; // 64KB - buen tamaño
+    public void WriteData(List<byte> data)
+    {
+        using (var file = File.Create("data.bin"))
+        {
+            var buffer = data.ToArray();
+            file.Write(buffer, 0, buffer.Length); // Una llamada para todo
+        }
+    }
+}
+
+// ✅ Mejor: Usar buffers grandes
+public class BestBulk
+{
+    private const int BufferSize = 65536;
     
-    public void ReadFile(string filePath)
+    public void WriteData(Stream source, Stream destination)
     {
         var buffer = new byte[BufferSize];
-        using (var file = File.OpenRead(filePath))
+        int bytesRead;
+        while ((bytesRead = source.Read(buffer, 0, BufferSize)) > 0)
         {
-            int bytesRead;
-            while ((bytesRead = file.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                ProcessChunk(buffer, bytesRead);
-            }
-        }
-    }
-}
-
-// ✅ Mejor: Usar FileStream con buffer size configurado
-public class BestBufferSize
-{
-    public void ReadFile(string filePath)
-    {
-        using (var file = new FileStream(
-            filePath, 
-            FileMode.Open, 
-            FileAccess.Read, 
-            FileShare.Read, 
-            65536, // Buffer size
-            FileOptions.SequentialScan)) // Hint para OS
-        {
-            var buffer = new byte[65536];
-            int bytesRead;
-            while ((bytesRead = file.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                ProcessChunk(buffer, bytesRead);
-            }
+            destination.Write(buffer, 0, bytesRead); // Operaciones grandes
         }
     }
 }

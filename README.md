@@ -3607,7 +3607,7 @@ public class BestFileStreaming
 
 ---
 
-### Choose correct IO chunk sizes
+### Choose correct IO chunk sizes (OK)
 
 **Cómo funciona:**
 El tamaño del buffer usado para I/O afecta el rendimiento. Buffers muy pequeños causan muchas llamadas al sistema, mientras que buffers muy grandes pueden desperdiciar memoria.
@@ -3693,7 +3693,7 @@ public class BestBufferSize
 
 ---
 
-### Use buffered streams
+### Use buffered streams (Ok)
 
 **Cómo funciona:**
 Buffered streams mantienen un buffer interno que reduce el número de llamadas al sistema operativo, agrupando múltiples operaciones pequeñas.
@@ -3778,7 +3778,7 @@ public class BestBuffering
 
 ---
 
-### Async file APIs
+### Async file APIs (Skipped)
 
 **Cómo funciona:**
 Las APIs async de archivo permiten que el thread se libere mientras espera I/O, permitiendo que otros trabajos se ejecuten. Esto mejora el throughput y la capacidad de respuesta.

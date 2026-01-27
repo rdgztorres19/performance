@@ -6623,3 +6623,559 @@ private SequencePosition ProcessBuffer(ReadOnlySequence<byte> buffer)
 - **For high-throughput**: Use `System.IO.Pipelines` instead of `StreamReader` for better performance
 
 ---
+## Choose Correct I/O Chunk Sizes to Balance Syscall Overhead and Memory Usage
+
+I/O operations read/write data in chunks (buffers). Each `Read()` or `Write()` call is a syscall that has fixed overhead (~0.1–1 µs). Reading a 1 GB file with a 64-byte buffer requires 16 million syscalls (16 million × 1 µs = 16 seconds of pure overhead). Reading the same file with a 64 KB buffer requires 16,000 syscalls (16,000 × 1 µs = 16 ms overhead). The optimal buffer size balances syscall overhead (fewer calls = less overhead) and memory usage (larger buffers = more memory). Typical optimal sizes: 4–64 KB for most workloads, aligned to disk block size (4 KB) or page size (4 KB). Use larger buffers (64–256 KB) for high-throughput sequential I/O, smaller buffers (4–16 KB) for random I/O or memory-constrained environments. The trade-off: larger buffers reduce syscall overhead but increase memory usage and can cause cache pollution. Always measure with realistic workloads—the "right" size depends on your specific I/O pattern, file size, and hardware. Typical improvements: 20%–50% higher I/O throughput, 10×–1000× fewer syscalls when using optimal buffer sizes.
+
+### Key terms
+
+**What is a buffer (chunk size)?** A buffer is a chunk of memory used to hold data temporarily during I/O operations. When you read from a file, you read data into a buffer, then process it. The buffer size determines how much data you read per syscall.
+
+Imagine you need to read and process a 1 GB file:
+
+```csharp
+// ❌ Bad: Very small buffer (64 bytes)
+public void ProcessFile(string filePath)
+{
+    var buffer = new byte[64];  // 64 bytes
+    using var file = File.OpenRead(filePath);
+    
+    int bytesRead;
+    while ((bytesRead = file.Read(buffer, 0, buffer.Length)) > 0)
+    {
+        ProcessChunk(buffer, bytesRead);
+    }
+}
+```
+
+**What happens:**
+- **Number of syscalls**: 1 GB / 64 bytes = 16,777,216 syscalls
+- **Syscall overhead**: 16,777,216 × 1 µs = 16.8 seconds of pure overhead
+- **Actual read time**: 1 GB / 100 MB/s = 10 seconds
+- **Total time**: 16.8 seconds (overhead) + 10 seconds (read) = 26.8 seconds
+
+**Why this is catastrophically slow:**
+- You spend 63% of time on syscall overhead, not actual I/O
+- Each syscall has fixed cost (mode switch, kernel entry, parameter validation)
+- 16 million syscalls create massive overhead
+
+**With optimal buffer (64 KB):**
+
+```csharp
+// ✅ Good: Optimal buffer (64 KB)
+public void ProcessFile(string filePath)
+{
+    var buffer = new byte[64 * 1024];  // 64 KB
+    using var file = File.OpenRead(filePath);
+    
+    int bytesRead;
+    while ((bytesRead = file.Read(buffer, 0, buffer.Length)) > 0)
+    {
+        ProcessChunk(buffer, bytesRead);
+    }
+}
+```
+
+**What happens:**
+- **Number of syscalls**: 1 GB / 64 KB = 16,384 syscalls
+- **Syscall overhead**: 16,384 × 1 µs = 16 ms of pure overhead
+- **Actual read time**: 1 GB / 100 MB/s = 10 seconds
+- **Total time**: 0.016 seconds (overhead) + 10 seconds (read) = 10.016 seconds
+
+**Improvement: 2.7× faster** (26.8 seconds → 10 seconds) by reducing syscall overhead from 16.8 seconds to 16 ms.
+
+**What is a syscall?** A system call—a request from your program to the operating system kernel. Examples: `read()`, `write()`, `open()`, `close()`. Each syscall has fixed overhead (~0.1–1 µs) for mode switch (user→kernel), parameter validation, and kernel entry/exit.
+
+**What is syscall overhead?** The fixed cost of making a syscall, regardless of how much data is transferred. This includes: mode switch (user→kernel mode), parameter copying, kernel entry/exit, return value handling. Typical cost: 0.1–1 µs per syscall.
+
+**What is disk block size?** The minimum unit of data that a disk can read/write. Most modern disks use 4 KB blocks. Reading less than 4 KB still reads an entire 4 KB block (wastes bandwidth). Reading in multiples of 4 KB is more efficient.
+
+**What is page size?** The size of memory pages managed by the OS (typically 4 KB on x86/x64). I/O operations often align to page boundaries for efficiency. Buffers aligned to page size (4 KB, 8 KB, 16 KB, etc.) are more efficient.
+
+**What is cache pollution?** When a large buffer evicts useful data from CPU cache. Example: A 1 MB buffer might evict other data from L2/L3 cache, slowing down subsequent operations.
+
+### Common misconceptions
+
+**"Larger buffers are always better"**
+- **The truth**: Larger buffers reduce syscall overhead, but they also increase memory usage, can cause cache pollution, and waste memory if you only need a small portion. For random I/O, smaller buffers (4–16 KB) are often better.
+
+**"The default buffer size is always optimal"**
+- **The truth**: Default buffer sizes (e.g., 4 KB for `FileStream`) are conservative and work for most cases, but they're not optimal for high-throughput sequential I/O. For high-performance scenarios, use 64–256 KB buffers.
+
+**"Buffer size doesn't matter for SSDs"**
+- **The truth**: SSDs are faster than HDDs, but syscall overhead still matters. Reading a 1 GB file with 64-byte buffers still requires 16 million syscalls (16 seconds overhead) even on SSD. Optimal buffer sizes are similar for SSDs and HDDs.
+
+**"I should use the largest buffer that fits in memory"**
+- **The truth**: Very large buffers (>1 MB) can cause cache pollution, increase GC pressure, and waste memory. The sweet spot is typically 4–64 KB for most workloads, 64–256 KB for high-throughput sequential I/O.
+
+## How It Works
+
+### Understanding Syscall Overhead
+
+**What happens during a `Read()` syscall:**
+
+```csharp
+int bytesRead = file.Read(buffer, 0, buffer.Length);
+```
+
+1. **User mode → Kernel mode** (mode switch):
+   - CPU switches from user mode to kernel mode
+   - **Cost: ~0.1–0.5 µs**
+
+2. **Parameter validation**:
+   - Kernel validates buffer pointer, size, file descriptor
+   - **Cost: ~0.1–0.2 µs**
+
+3. **Kernel I/O operation**:
+   - Kernel reads data from disk into kernel buffer
+   - Copies data from kernel buffer to user buffer
+   - **Cost: depends on data size and disk speed**
+
+4. **Kernel mode → User mode** (mode switch):
+   - CPU switches back to user mode
+   - **Cost: ~0.1–0.5 µs**
+
+**Total syscall overhead: ~0.3–1.2 µs** (fixed, regardless of data size)
+
+
+### Technical Details: Hardware Alignment
+
+**Why alignment matters:**
+
+**Disk block alignment**: Most disks read/write in 4 KB blocks. Reading 1 byte still reads an entire 4 KB block. Reading in multiples of 4 KB is more efficient:
+
+- **Misaligned read** (starting at byte 1): Reads blocks 0 and 1 (8 KB total) to get 4 KB
+- **Aligned read** (starting at byte 0): Reads block 0 (4 KB) to get 4 KB
+
+**Page size alignment**: OS memory pages are typically 4 KB. Buffers aligned to page boundaries are more efficient:
+
+- **Aligned buffer** (4 KB, 8 KB, 16 KB, 64 KB): OS can use direct memory access (DMA)
+- **Misaligned buffer**: OS might need to copy data, adding overhead
+
+**Optimal buffer sizes** (aligned to common boundaries):
+- **4 KB**: Aligned to disk block and page size (good for random I/O)
+- **8 KB**: 2× page size (good for small sequential I/O)
+- **16 KB**: 4× page size (good for medium sequential I/O)
+- **64 KB**: 16× page size (good for large sequential I/O, common default)
+- **256 KB**: Very large sequential I/O (diminishing returns beyond this)
+
+### How Buffer Size Affects Performance
+
+**Small buffers (<1 KB):**
+- **Pros**: Low memory usage
+- **Cons**: Many syscalls (high overhead), poor disk utilization (partial block reads)
+- **Example**: 64-byte buffer for 1 GB file = 16.8 seconds overhead
+
+**Medium buffers (4–64 KB):**
+- **Pros**: Good balance of syscall overhead and memory usage, aligned to hardware
+- **Cons**: None significant
+- **Example**: 64 KB buffer for 1 GB file = 16 ms overhead (optimal)
+
+**Large buffers (>256 KB):**
+- **Pros**: Minimal syscall overhead
+- **Cons**: High memory usage, cache pollution, GC pressure, diminishing returns
+- **Example**: 1 MB buffer for 1 GB file = 1 ms overhead (only 15 ms better than 64 KB, but uses 16× more memory)
+
+## Why This Becomes a Bottleneck
+
+Incorrect buffer sizes become a bottleneck because:
+
+**Excessive syscall overhead**: Small buffers (<1 KB) cause thousands or millions of syscalls. Each syscall has fixed overhead (0.1–1 µs), which accumulates. Example: 1 GB file with 64-byte buffer = 16.8 seconds of pure syscall overhead.
+
+**Poor disk utilization**: Small buffers don't align with disk block size (4 KB), causing partial block reads. The disk reads an entire 4 KB block but you only use a small portion, wasting bandwidth.
+
+**Cache pollution**: Very large buffers (>1 MB) can evict useful data from CPU cache (L2/L3), slowing down subsequent operations.
+
+**Memory waste**: Very large buffers waste memory if you only need a small portion of the data. Example: Using a 1 MB buffer to read 1 KB of data wastes 1023 KB.
+
+**GC pressure**: Very large buffers increase allocation size, potentially triggering full GC collections (100–1000 ms pauses).
+
+## When to Use This Approach
+
+Choose optimal buffer sizes when:
+
+- **High-throughput I/O** (ETL, data pipelines, log processing). Example: Processing 100 GB files where I/O throughput matters.
+- **Sequential I/O dominates** (reading/writing files from start to end). Example: Log analysis, CSV processing, file copying.
+- **I/O is a bottleneck** (profiling shows high I/O wait time). Example: Application spends 50%+ time waiting on I/O.
+- **Frequent I/O operations** (many small files or repeated reads). Example: Processing thousands of files where syscall overhead accumulates.
+
+**Recommended buffer sizes:**
+- **Random I/O**: 4–16 KB (aligned to disk block size)
+- **Sequential I/O**: 64–256 KB (good balance of overhead and memory)
+- **High-throughput sequential**: 256 KB–1 MB (diminishing returns beyond 256 KB)
+- **Memory-constrained**: 4–16 KB (minimize memory usage)
+
+### Scenario 1: High-throughput file copying
+
+**Problem**: Copying 100 GB files takes 30 minutes. Profiling shows high syscall overhead (many small reads).
+
+**Bad approach** (small buffer):
+
+```csharp
+// ❌ Bad: Very small buffer (64 bytes)
+public void CopyFile(string sourcePath, string destPath)
+{
+    var buffer = new byte[64];  // Too small!
+    using var source = File.OpenRead(sourcePath);
+    using var dest = File.OpenWrite(destPath);
+    
+    int bytesRead;
+    while ((bytesRead = source.Read(buffer, 0, buffer.Length)) > 0)
+    {
+        dest.Write(buffer, 0, bytesRead);
+    }
+    // 100 GB / 64 bytes = 1.6 billion syscalls = hours of overhead!
+}
+```
+
+**Good approach** (optimal buffer):
+
+```csharp
+// ✅ Good: Optimal buffer (64 KB)
+public void CopyFile(string sourcePath, string destPath)
+{
+    var buffer = new byte[64 * 1024];  // 64 KB
+    using var source = File.OpenRead(sourcePath);
+    using var dest = File.OpenWrite(destPath);
+    
+    int bytesRead;
+    while ((bytesRead = source.Read(buffer, 0, buffer.Length)) > 0)
+    {
+        dest.Write(buffer, 0, bytesRead);
+    }
+    // 100 GB / 64 KB = 1.6 million syscalls = seconds of overhead
+}
+```
+
+**Results**:
+- **Bad**: 30+ minutes (excessive syscall overhead)
+- **Good**: 10–15 minutes (optimal syscall overhead)
+- **Improvement**: 2× faster
+
+### Scenario 2: Random file access (use smaller buffers)
+
+**Problem**: Reading random 4 KB chunks from a large file. Using 1 MB buffers wastes memory.
+
+**Bad approach** (large buffer for random access):
+
+```csharp
+// ❌ Bad: Large buffer for random access
+public byte[] ReadRandomChunk(string filePath, long offset, int size)
+{
+    var buffer = new byte[1024 * 1024];  // 1 MB (too large!)
+    using var file = File.OpenRead(filePath);
+    file.Seek(offset, SeekOrigin.Begin);
+    file.Read(buffer, 0, size);  // Only need 4 KB, but allocated 1 MB
+    return buffer.Take(size).ToArray();  // Wasted 1020 KB
+}
+```
+
+**Good approach** (smaller buffer for random access):
+
+```csharp
+// ✅ Good: Smaller buffer aligned to disk block (4 KB)
+public byte[] ReadRandomChunk(string filePath, long offset, int size)
+{
+    var buffer = new byte[4096];  // 4 KB (aligned to disk block)
+    using var file = File.OpenRead(filePath);
+    file.Seek(offset, SeekOrigin.Begin);
+    file.Read(buffer, 0, size);
+    return buffer.Take(size).ToArray();
+}
+```
+
+**Results**:
+- **Bad**: 1 MB memory per read (wastes 1020 KB)
+- **Good**: 4 KB memory per read (efficient)
+- **Improvement**: 256× less memory usage
+
+---
+
+## Use Buffered Streams to Reduce Syscall Overhead for Small I/O Operations
+
+Buffered streams maintain an internal buffer (typically 4–64 KB) that batches multiple small I/O operations into fewer, larger syscalls, dramatically reducing syscall overhead. Without buffering, each small operation (e.g., writing a 100-byte line) triggers a separate syscall (~0.1–1 µs overhead). Writing 10,000 lines without buffering = 10,000 syscalls = 1–10 ms overhead. With buffering, those 10,000 lines are batched into ~25 syscalls (assuming 4 KB buffer) = 0.025 ms overhead. In .NET, `FileStream` has default buffering (4 KB), but `StreamWriter`/`StreamReader` add an additional text-encoding buffer. Use explicit `BufferedStream` when working with raw byte streams or when you need larger buffers. Always call `Flush()` or `FlushAsync()` before closing streams to ensure data is written. The trade-off: buffering uses additional memory (buffer size) and requires explicit flushing for durability. Typical improvements: 10%–50% faster for small, frequent I/O operations, 10×–1000× fewer syscalls.
+
+### Key terms
+
+**What is a buffered stream?** A stream wrapper that maintains an internal buffer (typically 4–64 KB) to batch multiple small I/O operations into fewer, larger syscalls. Example: `BufferedStream` in .NET wraps another stream and buffers reads/writes.
+
+**What is a mode switch?** The CPU transition between user mode and kernel mode. Each syscall requires two mode switches: user→kernel (when entering syscall) and kernel→user (when returning). This wastes CPU cycles. Batching operations reduces mode switches. Example: 10,000 syscalls = 10,000 mode switches. 16 syscalls = 16 mode switches (625× reduction).
+
+**What is `FileStream` default buffering?** `FileStream` in .NET has built-in buffering (default: 4 KB). When you create a `FileStream`, it automatically buffers reads/writes to reduce syscall overhead. You can specify a custom buffer size in the constructor.
+
+**What is `StreamWriter`/`StreamReader` buffering?** `StreamWriter` and `StreamReader` maintain an internal buffer (default: 1 KB for `StreamWriter`, varies for `StreamReader`) for text encoding/decoding. This is separate from the underlying stream's buffer. Example: `StreamWriter` buffers text before encoding to bytes, then writes to the underlying stream.
+
+**What is `BufferedStream`?** A .NET class that wraps another stream and adds an additional layer of buffering. Use `BufferedStream` when you need larger buffers or when working with raw byte streams that don't have built-in buffering. Example: `new BufferedStream(fileStream, 64 * 1024)` adds a 64 KB buffer.
+
+**What is flushing?** The act of writing buffered data to the underlying storage. When you call `Flush()` or `FlushAsync()`, all buffered data is written immediately. Without flushing, data remains in the buffer until the buffer is full or the stream is closed/disposed.
+
+**What is double buffering?** When you have multiple layers of buffering (e.g., `StreamWriter` buffer + `BufferedStream` buffer + `FileStream` buffer). This can be unnecessary overhead if not needed, but it's often fine because each layer serves a different purpose (text encoding vs. syscall batching).
+
+### How it works (system level)
+
+**What happens during a syscall:**
+
+1. **User mode → Kernel mode** (mode switch):
+   - CPU switches from user mode to kernel mode
+   - **Cost: ~0.1–0.5 µs**
+
+2. **Parameter validation**:
+   - Kernel validates buffer pointer, size, file descriptor
+   - **Cost: ~0.1–0.2 µs**
+
+3. **Kernel I/O operation**:
+   - Kernel reads/writes data from/to disk
+   - Copies data between kernel buffer and user buffer
+   - **Cost: depends on data size and disk speed**
+
+4. **Kernel mode → User mode** (mode switch):
+   - CPU switches back to user mode
+   - **Cost: ~0.1–0.5 µs**
+
+**Total syscall overhead: ~0.3–1.2 µs** (fixed, regardless of data size)
+
+**Why buffering reduces overhead:**
+
+- **Without buffering**: Each small operation (100 bytes) = 1 syscall = 1 µs overhead
+- **With buffering**: Multiple small operations batched into one large operation (64 KB) = 1 syscall = 1 µs overhead
+- **Example**: Writing 10,000 lines (100 bytes each):
+  - **Without buffering**: 10,000 syscalls = 10,000 × 1 µs = 10 ms overhead
+  - **With 64 KB buffering**: 16 syscalls = 16 × 1 µs = 0.016 ms overhead (625× reduction)
+
+### How it works (.NET level)
+
+**How `FileStream` buffering works:**
+
+```csharp
+using var file = new FileStream("file.txt", FileMode.Create);
+file.Write(buffer, 0, buffer.Length);
+```
+
+1. **`FileStream` constructor**:
+   - Opens file handle
+   - Allocates internal buffer (default: 4 KB)
+   - **Memory usage: ~4 KB** (buffer)
+
+2. **`Write()` call**:
+   - Data is written to the internal buffer (not directly to disk)
+   - If buffer is full, buffer is flushed to disk (syscall)
+   - **Memory usage: ~4 KB** (buffer holds data until flushed)
+
+3. **Buffer flush**:
+   - When buffer is full or `Flush()` is called, data is written to disk
+   - **Syscall**: `write()` syscall with 4 KB of data
+
+**How `StreamWriter` buffering works:**
+
+```csharp
+using var writer = new StreamWriter("file.txt");
+writer.WriteLine("Hello");
+```
+
+1. **`StreamWriter` constructor**:
+   - Opens underlying `FileStream` (which has its own 4 KB buffer)
+   - Allocates internal text buffer (default: 1 KB for encoding)
+   - **Memory usage: ~5 KB** (1 KB text buffer + 4 KB FileStream buffer)
+
+2. **`WriteLine()` call**:
+   - Text is written to the internal text buffer
+   - When buffer is full, text is encoded to bytes and written to underlying `FileStream`
+   - `FileStream` buffers the bytes (4 KB buffer)
+   - **Memory usage: ~5 KB** (text buffer + FileStream buffer)
+
+3. **Buffer flush chain**:
+   - When `StreamWriter` buffer is full → encoded bytes → `FileStream` buffer
+   - When `FileStream` buffer is full → syscall to disk
+
+**How `BufferedStream` works:**
+
+```csharp
+using var file = File.Create("file.txt");
+using var buffered = new BufferedStream(file, 64 * 1024);  // 64 KB buffer
+buffered.Write(buffer, 0, buffer.Length);
+```
+
+1. **`BufferedStream` constructor**:
+   - Wraps underlying stream (`FileStream` with its own 4 KB buffer)
+   - Allocates additional buffer (64 KB)
+   - **Memory usage: ~68 KB** (64 KB BufferedStream buffer + 4 KB FileStream buffer)
+
+2. **`Write()` call**:
+   - Data is written to `BufferedStream` buffer (64 KB)
+   - When buffer is full, data is written to underlying `FileStream` (which buffers it in its 4 KB buffer)
+   - When `FileStream` buffer is full, data is written to disk (syscall)
+
+3. **Double buffering**:
+   - `BufferedStream` buffer (64 KB) → `FileStream` buffer (4 KB) → disk
+   - This is fine because `BufferedStream` batches many small writes, then `FileStream` batches the larger writes
+
+### Performance comparison
+
+**Small, frequent operations (benefits from buffering):**
+
+Writing 10,000 small lines (100 bytes each):
+
+- **Without buffering** (hypothetical):
+  - 10,000 writes = 10,000 potential syscalls
+  - Overhead: 10,000 × 1 µs = 10 ms
+  - Write time: 1 MB / 100 MB/s = 10 ms
+  - **Total: 20 ms**
+
+- **With `StreamWriter` buffering** (1 KB buffer):
+  - 1 KB buffer holds ~10 lines
+  - 10,000 lines = 1,000 buffer flushes = 1,000 writes to `FileStream`
+  - `FileStream` buffers (4 KB) batches ~40 lines per syscall
+  - Syscalls: 1 MB / 4 KB = 250 syscalls
+  - Overhead: 250 × 1 µs = 0.25 ms
+  - Write time: 10 ms
+  - **Total: 10.25 ms**
+
+- **With `BufferedStream` + `StreamWriter`** (64 KB buffer):
+  - 64 KB buffer holds ~640 lines
+  - 10,000 lines = ~16 buffer flushes = 16 writes to `FileStream`
+  - `FileStream` buffers (4 KB) batches writes
+  - Syscalls: ~16 syscalls (when `FileStream` buffer fills)
+  - Overhead: 16 × 1 µs = 0.016 ms
+  - Write time: 10 ms
+  - **Total: 10.016 ms**
+
+**Large, infrequent operations (minimal benefit from additional buffering):**
+
+Writing 1 MB at once:
+
+- **Without additional buffering**:
+  - 1 MB write = 1 syscall (or a few if `FileStream` buffer is smaller)
+  - Overhead: 1 × 1 µs = 0.001 ms
+  - Write time: 1 MB / 100 MB/s = 10 ms
+  - **Total: 10.001 ms**
+
+- **With `BufferedStream`** (64 KB buffer):
+  - 1 MB write = still ~1 syscall (buffer fills immediately, then flushes)
+  - Overhead: 1 × 1 µs = 0.001 ms
+  - Write time: 10 ms
+  - **Total: 10.001 ms (no improvement)**
+
+**Key insight**: Buffering helps for small, frequent operations. For large operations, the overhead is already amortized.
+
+### Why this becomes a bottleneck
+
+Unbuffered or insufficiently buffered streams become a bottleneck because:
+
+**Excessive syscall overhead**: Without buffering, each small I/O operation triggers a separate syscall. Example: Writing 10,000 lines (100 bytes each) = 10,000 potential syscalls = 10 ms overhead. With 64 KB buffering = 16 syscalls = 0.016 ms overhead (625× reduction).
+
+**Poor throughput for small operations**: Small operations (e.g., writing a single line) have high overhead relative to the data size. Example: Writing 100 bytes with 1 µs syscall overhead = 1% overhead. Writing 100 bytes 10,000 times = 10,000 × 1 µs = 10 ms overhead vs 10 ms actual write time = 50% overhead.
+
+**CPU waste on mode switches**: Each syscall requires a mode switch (user→kernel→user), which wastes CPU cycles. Batching operations reduces mode switches. Example: 10,000 syscalls = 10,000 mode switches. 16 syscalls = 16 mode switches (625× reduction).
+
+**Inefficient disk utilization**: Small writes don't align with disk block size (4 KB), causing partial block writes. Buffering batches small writes into larger, block-aligned writes. Example: 100-byte writes don't align to 4 KB blocks. 64 KB buffer batches writes into 4 KB-aligned chunks.
+
+### Example scenarios
+
+#### Scenario 1: Writing many log lines
+
+**Problem**: A logging library writes 100,000 log lines (100 bytes each) to a file. Without buffering, this causes excessive syscall overhead.
+
+**Bad approach** (no explicit buffering, relying on defaults):
+
+```csharp
+// ❌ Bad: Relying on default buffering (might not be optimal)
+public void WriteLogs(string filePath, IEnumerable<string> logs)
+{
+    using var writer = new StreamWriter(filePath);  // Default: 1 KB buffer
+    foreach (var log in logs)
+    {
+        writer.WriteLine(log);  // 100,000 lines = many buffer flushes
+    }
+    // StreamWriter buffers (1 KB), but might flush frequently
+    // FileStream buffers (4 KB), but many small flushes from StreamWriter
+}
+```
+
+**Good approach** (explicit larger buffer):
+
+```csharp
+// ✅ Good: Explicit larger buffer for high-throughput logging
+public void WriteLogs(string filePath, IEnumerable<string> logs)
+{
+    using var file = File.Create(filePath);
+    using var buffered = new BufferedStream(file, 64 * 1024);  // 64 KB buffer
+    using var writer = new StreamWriter(buffered);
+    
+    foreach (var log in logs)
+    {
+        writer.WriteLine(log);  // Batched in 64 KB buffer
+    }
+    writer.Flush();  // Ensure all data is written
+    // 100,000 lines × 100 bytes = 10 MB
+    // 10 MB / 64 KB = ~156 syscalls (vs potentially thousands without buffering)
+}
+```
+
+**Results**:
+- **Bad**: Many buffer flushes, potentially thousands of syscalls
+- **Good**: ~156 syscalls, 2× faster
+- **Improvement**: 10×–100× fewer syscalls, 50% faster
+
+#### Scenario 2: Reading small chunks from network stream
+
+**Problem**: Reading small chunks (1 KB) from a network stream. `NetworkStream` doesn't buffer by default, causing excessive syscalls.
+
+**Bad approach** (no buffering):
+
+```csharp
+// ❌ Bad: No buffering for network stream
+public async Task ProcessNetworkData(NetworkStream stream)
+{
+    var buffer = new byte[1024];  // 1 KB
+    int bytesRead;
+    while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+    {
+        ProcessChunk(buffer, bytesRead);
+        // Each ReadAsync = 1 syscall = 1 µs overhead
+        // Reading 10 MB = 10,000 syscalls = 10 ms overhead
+    }
+}
+```
+
+**Good approach** (with buffering):
+
+```csharp
+// ✅ Good: BufferedStream for network I/O
+public async Task ProcessNetworkData(NetworkStream stream)
+{
+    using var buffered = new BufferedStream(stream, 64 * 1024);  // 64 KB buffer
+    var buffer = new byte[1024];  // 1 KB
+    int bytesRead;
+    while ((bytesRead = await buffered.ReadAsync(buffer, 0, buffer.Length)) > 0)
+    {
+        ProcessChunk(buffer, bytesRead);
+        // BufferedStream batches reads: 10 MB / 64 KB = ~156 syscalls
+        // 156 syscalls = 0.156 ms overhead (64× reduction)
+    }
+}
+```
+
+**Results**:
+- **Bad**: 10,000 syscalls, 10 ms overhead
+- **Good**: ~156 syscalls, 0.156 ms overhead
+- **Improvement**: 64× fewer syscalls, 10× faster
+
+### Common misconceptions
+
+**"`FileStream` doesn't have buffering"**
+- **The truth**: `FileStream` has built-in buffering (default: 4 KB). You don't need `BufferedStream` for basic file I/O unless you need a larger buffer or are working with non-file streams.
+
+**"`StreamWriter` doesn't buffer"**
+- **The truth**: `StreamWriter` has an internal buffer (default: 1 KB) for text encoding. It batches writes before encoding to bytes. However, if you're writing many small lines, a larger buffer (via `BufferedStream`) can help.
+
+**"Buffering always makes things faster"**
+- **The truth**: Buffering helps for small, frequent operations. For large, infrequent operations (e.g., writing 1 MB at once), buffering provides minimal benefit because the overhead is already amortized over the large write.
+
+**"I need `BufferedStream` for all file I/O"**
+- **The truth**: `FileStream` already has buffering. Use `BufferedStream` only when you need larger buffers or when working with non-file streams (e.g., network streams, memory streams).
+
+**"Flushing is automatic"**
+- **The truth**: Flushing happens automatically when the buffer is full or when the stream is closed/disposed. However, if the process crashes before closing, buffered data is lost. Always call `Flush()` for critical data.
+---
+
+
