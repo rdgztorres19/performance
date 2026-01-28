@@ -7899,6 +7899,1160 @@ public List<Item> ProcessItems(List<Item> items, int minValue, int maxValue, str
 - **Bad**: 3 closures per item = many allocations, GC pressure, slower
 - **Good**: 0 closures = 0 allocations, no GC pressure, faster
 - **Improvement**: 10%–30% faster, significantly reduced allocations
+
+---
+
+## Avoid Exceptions for Control Flow
+
+Exceptions are expensive operations (stack unwinding, object creation, exception handling overhead). Using exceptions for normal control flow (e.g., checking if a value exists, validating input, handling expected errors) is extremely inefficient—100x to 10,000x slower than using return values, TryParse methods, or Result patterns. Typical improvements: 100x to 10,000x faster in code using exceptions for control flow, reduced CPU overhead, better performance predictability.
+
+### How exceptions work internally (behind the scenes)
+
+**What happens when an exception is thrown:**
+
+```csharp
+public int ParseInt(string value)
+{
+    try
+    {
+        return int.Parse(value); // Throws FormatException if parsing fails
+    }
+    catch (FormatException)
+    {
+        return -1; // Exception handling
+    }
+}
+```
+
+**Internal process (step by step):**
+
+1. **Exception object creation**: Runtime creates an `FormatException` object on the heap. This involves:
+   - Allocating memory on the heap for the exception object
+   - Initializing exception fields (message, stack trace, inner exception)
+   - Capturing stack trace information (expensive operation)
+
+2. **Stack unwinding**: Runtime traverses the call stack to find a catch block. This involves:
+   - Walking up the call stack frame by frame
+   - Checking each frame for a matching catch block
+   - Executing any finally blocks encountered during unwinding
+   - Cleaning up resources (disposing objects, releasing locks)
+   
+   **Why the runtime must traverse the stack**: The catch block that handles the exception may not be in the same method where the exception is thrown. The exception can be thrown deep in the call stack (e.g., in a low-level parsing method), but the catch block might be several levels up (e.g., in a high-level request handler). The runtime doesn't know where the catch block is located, so it must walk up the call stack frame by frame, checking each method for a matching catch block. Example: Method A calls Method B, which calls Method C, which throws an exception. The catch block is in Method A. The runtime must traverse: Method C → Method B → Method A (checking each frame) until it finds the catch block in Method A. This traversal is expensive because each frame must be examined, and any finally blocks encountered must be executed to ensure proper cleanup.
+
+3. **Exception handling**: Runtime processes the exception (expensive operation):
+   - Matching exception type to catch block
+   - Setting up exception context
+   - Transferring control to catch block
+
+4. **Catch block execution**: Catch block executes, handling the exception
+
+**Performance cost breakdown:**
+- **Stack unwinding**: Traversing the call stack is expensive (CPU cycles). Each frame must be examined, and finally blocks must be executed.
+- **Object creation**: Exception objects are allocated on the heap (memory allocation). Exception objects include stack trace information, which is expensive to capture.
+- **Exception handling overhead**: Runtime processing is expensive (CPU cycles). The runtime must match exception types, set up context, and transfer control.
+- **Total cost**: 100x to 10,000x slower than normal flow
+
+**How avoiding exceptions works (behind the scenes):**
+
+```csharp
+public int ParseInt(string value)
+{
+    if (int.TryParse(value, out int result))
+    {
+        return result; // Normal flow, no exception
+    }
+    return -1; // Normal flow, no exception
+}
+```
+
+**Internal process (step by step):**
+
+1. **TryParse method**: `int.TryParse()` attempts to parse the string internally:
+   - Checks if string is valid format
+   - Attempts conversion
+   - Returns `bool` indicating success/failure
+   - Sets `out` parameter with parsed value if successful
+
+2. **Return value**: Method returns `bool` indicating success/failure (normal return, no exception)
+
+3. **Out parameter**: Parsed value is returned via `out` parameter (normal parameter passing, no exception)
+
+4. **Normal flow**: No exception thrown, normal return value used (normal control flow)
+
+5. **Fast performance**: Normal flow is 100x to 10,000x faster than exceptions
+
+**Performance benefit breakdown:**
+- **No stack unwinding**: No call stack traversal needed. Normal return instruction executes.
+- **No object creation**: No exception object allocated. No heap allocation.
+- **No exception handling overhead**: No runtime processing. Normal method return.
+- **Total benefit**: 100x to 10,000x faster than exceptions
+
+**Key insight**: Exceptions involve expensive runtime operations (stack unwinding, object creation, exception handling). Using return values, TryParse, or Result patterns for normal control flow eliminates this overhead, using normal method returns instead.
+
+### Technical details: Exception handling overhead
+
+**Exception with stack unwinding (what happens internally):**
+
+```csharp
+public int ParseInt(string value)
+{
+    try
+    {
+        return int.Parse(value); // Throws FormatException
+    }
+    catch (FormatException)
+    {
+        return -1; // Exception handling
+    }
+}
+```
+
+**Internal process:**
+- **Exception thrown**: `FormatException` is thrown when parsing fails. Runtime creates exception object on heap.
+- **Stack unwinding**: Runtime traverses call stack frame by frame (expensive). Each frame is examined for catch blocks.
+- **Object creation**: Exception object allocated on heap (memory allocation). Stack trace is captured (expensive).
+- **Exception handling**: Runtime processes exception (expensive). Exception type matching, context setup, control transfer.
+- **Performance cost**: 100x to 10,000x slower than normal flow
+
+**TryParse without exceptions (what happens internally):**
+
+```csharp
+public int ParseInt(string value)
+{
+    if (int.TryParse(value, out int result))
+    {
+        return result; // Normal flow
+    }
+    return -1; // Normal flow
+}
+```
+
+**Internal process:**
+- **TryParse method**: Returns `bool` indicating success/failure. Normal method return (no exception).
+- **Normal flow**: No exception thrown, normal return value used. Normal control flow (if statement, return statement).
+- **No stack unwinding**: No call stack traversal needed. Normal return instruction executes.
+- **No object creation**: No exception object allocated. No heap allocation.
+- **Performance benefit**: 100x to 10,000x faster than exceptions
+
+**Result pattern without exceptions (what happens internally):**
+
+```csharp
+public (bool Success, int Value) TryParseInt(string value)
+{
+    if (int.TryParse(value, out int result))
+    {
+        return (true, result); // Normal flow
+    }
+    return (false, 0); // Normal flow
+}
+```
+
+**Internal process:**
+- **Result pattern**: Returns tuple with success status and value. Normal method return (no exception).
+- **Normal flow**: No exception thrown, normal return value used. Normal control flow (return statement).
+- **No stack unwinding**: No call stack traversal needed. Normal return instruction executes.
+- **No object creation**: No exception object allocated. Tuple is created on stack (value type).
+- **Performance benefit**: 100x to 10,000x faster than exceptions
+
+**Key insight**: Using return values, TryParse, or Result patterns for normal control flow eliminates exception handling overhead (stack unwinding, object creation, runtime processing), using normal method returns instead. This improves performance by 100x to 10,000x.
+
+### Why exceptions become a bottleneck (internal perspective)
+
+**Accumulating overhead**: In hot paths, exceptions create many expensive operations. Each exception involves:
+- Stack unwinding (traversing call stack frame by frame)
+- Object creation (heap allocation for exception object)
+- Exception handling (runtime processing)
+- Example: Processing 1 million invalid inputs with exceptions = 1 million exception operations = severe performance degradation
+
+**Stack unwinding cost**: Each exception requires stack unwinding, which is expensive. The runtime must:
+- Walk up the call stack frame by frame
+- Check each frame for catch blocks
+- Execute finally blocks encountered during unwinding
+- Clean up resources (disposing objects, releasing locks)
+- Example: 1 million exceptions = 1 million stack unwinding operations = high CPU overhead
+
+**Object creation overhead**: Exception objects are allocated on the heap, increasing GC pressure. Exception objects include:
+- Exception message
+- Stack trace information (expensive to capture)
+- Inner exception references
+- Example: 1 million exceptions = 1 million exception objects = high GC pressure = frequent GC = performance degradation
+
+**Exception handling overhead**: Runtime processing of exceptions is expensive. The runtime must:
+- Match exception type to catch block
+- Set up exception context
+- Transfer control to catch block
+- Example: 1 million exceptions = 1 million expensive runtime operations = severe performance degradation
+
+**CPU overhead**: Exception handling wastes CPU cycles, reducing throughput. Stack unwinding, object creation, and runtime processing consume CPU cycles that could be used for actual work. Example: Exception handling overhead of 100x = 100x slower throughput.
+
+**Cache pollution**: Many exception objects can pollute the CPU cache, slowing down subsequent operations. Allocating many exception objects evicts useful data from cache, reducing cache hit rates. Example: Allocating many exception objects evicts useful data from cache.
+
+### Example scenarios (behind the scenes)
+
+#### Scenario 1: Hot path with input parsing
+
+**Problem**: A hot path processes 1 million user inputs, using exceptions to check if parsing succeeds, causing severe performance degradation.
+
+**Bad approach** (exceptions for control flow - what happens internally):
+
+```csharp
+// ❌ Bad: Exceptions for control flow
+public int ParseInt(string value)
+{
+    try
+    {
+        return int.Parse(value); // Throws FormatException if parsing fails
+    }
+    catch (FormatException)
+    {
+        return -1; // Using exception for control flow
+    }
+    // What happens internally: 1 million invalid inputs = 1 million exceptions
+    // Each exception: stack unwinding + object creation + exception handling = expensive
+}
+```
+
+**Internal process per exception:**
+1. `int.Parse()` throws `FormatException` → runtime creates exception object on heap
+2. Runtime unwinds stack → traverses call stack frame by frame
+3. Runtime finds catch block → processes exception (expensive)
+4. Catch block executes → returns -1
+
+**Good approach** (TryParse, no exceptions - what happens internally):
+
+```csharp
+// ✅ Good: TryParse, no exceptions
+public int ParseInt(string value)
+{
+    if (int.TryParse(value, out int result))
+    {
+        return result; // Normal flow, no exception
+    }
+    return -1; // Normal flow, no exception
+    // What happens internally: 1 million invalid inputs = 0 exceptions
+    // Each operation: normal method return + normal control flow = fast
+}
+```
+
+**Internal process per operation:**
+1. `int.TryParse()` attempts parsing → returns `bool` (normal return)
+2. `if` statement checks result → normal control flow
+3. Return statement executes → normal return (no exception)
+
+**Results**:
+- **Bad**: 1 million exceptions = 1 million expensive operations (stack unwinding + object creation + exception handling) = severe performance degradation, 100x to 10,000x slower
+- **Good**: 0 exceptions = 0 expensive operations = fast performance, 100x to 10,000x faster
+- **Improvement**: 100x to 10,000x faster, eliminated stack unwinding, eliminated object creation, eliminated exception handling overhead
+
+#### Scenario 2: Dictionary lookup with exceptions
+
+**Problem**: Hot path uses exceptions to check if a dictionary key exists, causing many expensive exception operations.
+
+**Bad approach** (exceptions for control flow - what happens internally):
+
+```csharp
+// ❌ Bad: Exceptions for control flow
+public string GetValue(Dictionary<string, string> dict, string key)
+{
+    try
+    {
+        return dict[key]; // Throws KeyNotFoundException if key doesn't exist
+    }
+    catch (KeyNotFoundException)
+    {
+        return null; // Using exception for control flow
+    }
+    // What happens internally: 1 million missing keys = 1 million exceptions
+    // Each exception: stack unwinding + object creation + exception handling = expensive
+}
+```
+
+**Internal process per exception:**
+1. Dictionary indexer throws `KeyNotFoundException` → runtime creates exception object on heap
+2. Runtime unwinds stack → traverses call stack frame by frame
+3. Runtime finds catch block → processes exception (expensive)
+4. Catch block executes → returns null
+
+**Good approach** (TryGetValue, no exceptions - what happens internally):
+
+```csharp
+// ✅ Good: TryGetValue, no exceptions
+public string GetValue(Dictionary<string, string> dict, string key)
+{
+    if (dict.TryGetValue(key, out string value))
+    {
+        return value; // Normal flow, no exception
+    }
+    return null; // Normal flow, no exception
+    // What happens internally: 1 million missing keys = 0 exceptions
+    // Each operation: normal method return + normal control flow = fast
+}
+```
+
+**Internal process per operation:**
+1. `dict.TryGetValue()` checks key → returns `bool` (normal return)
+2. `if` statement checks result → normal control flow
+3. Return statement executes → normal return (no exception)
+
+**Results**:
+- **Bad**: 1 million exceptions = 1 million expensive operations (stack unwinding + object creation + exception handling) = severe performance degradation, 100x to 10,000x slower
+- **Good**: 0 exceptions = 0 expensive operations = fast performance, 100x to 10,000x faster
+- **Improvement**: 100x to 10,000x faster, eliminated stack unwinding, eliminated object creation, eliminated exception handling overhead
+
+### Key takeaways
+
+- **Use for**: Hot paths (frequently executed code), input validation, parsing operations, performance-critical code, expected errors
+- **Avoid when**: Truly exceptional cases (unexpected errors, system failures), cold paths (infrequently executed code), code readability is more important, single execution, performance impact is negligible
+- **Internal process**: Exceptions involve stack unwinding (traversing call stack), object creation (heap allocation), and exception handling (runtime processing). Avoiding exceptions uses normal method returns instead.
+- **Performance cost**: Stack unwinding + object creation + exception handling = 100x to 10,000x slower than normal flow
+- **Performance benefit**: Normal method return + normal control flow = 100x to 10,000x faster than exceptions
+- **Typical improvements**: 100x to 10,000x faster in code using exceptions for control flow, eliminated stack unwinding, eliminated object creation, eliminated exception handling overhead, reduced CPU overhead, better performance predictability
+- **Trade-off**: Avoiding exceptions for control flow requires code design changes (must use return values, out parameters, or Result types instead) and may make code slightly more verbose
+- **Important**: Exceptions are fine in cold paths where the overhead is negligible. Reserve exceptions for truly exceptional cases (unexpected errors, system failures).
+
+---
+
+## Prefer Lock-Free Algorithms for High-Contention Scenarios
+
+Lock-free algorithms use atomic operations (like Compare-And-Swap) instead of locks, eliminating blocking and improving performance. Lock-free algorithms can improve performance by 20%–100% compared to locks in high-contention scenarios, with greater impact as thread count increases. Typical improvements: 20%–100% faster than locks in high-contention scenarios, better scalability, no deadlocks, reduced contention.
+
+### How lock-free algorithms work (behind the scenes)
+
+**How locks work (for comparison):**
+
+```csharp
+public class LockBasedCounter
+{
+    private long _value = 0;
+    private readonly object _lock = new object();
+    
+    public void Increment()
+    {
+        lock (_lock) // Acquire lock (blocks if another thread holds it)
+        {
+            _value++; // Critical section
+        } // Release lock
+    }
+}
+```
+
+**What happens internally:**
+
+1. **Lock acquisition**: Thread attempts to acquire lock
+   - If lock is available: Thread acquires lock and continues
+   - If lock is held: Thread blocks, waiting for lock to be released
+2. **Critical section**: Thread executes code in critical section
+3. **Lock release**: Thread releases lock, allowing other threads to acquire it
+
+**Performance characteristics:**
+- **Blocking**: Threads block when lock is held, wasting CPU cycles
+- **Contention**: Multiple threads competing for lock causes contention
+- **Serialization**: Only one thread executes critical section at a time
+- **Context switching**: Blocked threads cause context switches
+
+**How lock-free algorithms work:**
+
+```csharp
+public class LockFreeCounter
+{
+    private long _value = 0;
+    
+    public void Increment()
+    {
+        Interlocked.Increment(ref _value); // Atomic operation, no lock
+    }
+}
+```
+
+**What happens internally:**
+
+1. **Atomic operation**: `Interlocked.Increment()` uses atomic CPU instruction
+2. **No locking**: No locks are acquired or released
+3. **Hardware support**: CPU provides atomic instructions (e.g., `LOCK INC` on x86)
+4. **Memory barrier**: Atomic operations include memory barriers to ensure visibility
+
+**Performance characteristics:**
+- **No blocking**: Threads don't block, they retry if operation fails
+- **Reduced contention**: Multiple threads can execute concurrently
+- **Better scalability**: Performance improves with thread count
+- **No deadlocks**: Lock-free algorithms can't cause deadlocks
+
+**Key insight**: Lock-free algorithms use atomic CPU instructions instead of locks, eliminating blocking and improving scalability.
+
+### Technical details: Compare-And-Swap (CAS) operations
+
+**How Compare-And-Swap works:**
+
+```csharp
+// Simplified example of CAS operation
+public bool CompareAndSwap(ref long location, long expectedValue, long newValue)
+{
+    // Atomically: if (location == expectedValue) { location = newValue; return true; } else { return false; }
+    long originalValue = Interlocked.CompareExchange(ref location, newValue, expectedValue);
+    return originalValue == expectedValue;
+}
+```
+
+**What happens:**
+
+1. **Read current value**: Read the current value of `location`
+2. **Compare**: Compare current value with `expectedValue`
+3. **Swap if match**: If values match, atomically update to `newValue`
+4. **Return result**: Return `true` if swap succeeded, `false` otherwise
+
+**Example usage (lock-free stack push - what happens internally):**
+
+```csharp
+public class LockFreeStack<T>
+{
+    private volatile Node _head;
+    
+    public void Push(T item)
+    {
+        var newNode = new Node { Value = item };
+        Node currentHead;
+        do
+        {
+            currentHead = _head; // Read current head
+            newNode.Next = currentHead; // Set new node's next to current head
+            // Try to update head atomically
+            // If head hasn't changed since we read it, update it to newNode
+        } while (Interlocked.CompareExchange(ref _head, newNode, currentHead) != currentHead);
+        // Retry if CAS failed (another thread modified head)
+    }
+    
+    private class Node
+    {
+        public T Value;
+        public Node Next;
+    }
+}
+```
+
+**What happens internally:**
+
+1. **Read head**: Read current head of stack
+2. **Prepare new node**: Create new node pointing to current head
+3. **CAS attempt**: Try to atomically update head to new node
+   - If head hasn't changed: CAS succeeds, new node becomes head
+   - If head changed: CAS fails, retry from step 1
+4. **Retry on failure**: If CAS fails (another thread modified head), retry from step 1
+5. **Success**: When CAS succeeds, new node is at head of stack
+
+**Key insight**: CAS operations allow lock-free algorithms to update shared state atomically without locks. Retry loops handle contention by retrying when CAS fails.
+
+### Technical details: Memory ordering and visibility
+
+**Why memory ordering matters:**
+
+```csharp
+// ❌ Bad: Incorrect memory ordering (simplified example)
+public class BadLockFreeCounter
+{
+    private long _value = 0;
+    
+    public void Increment()
+    {
+        _value++; // Not atomic! Race condition possible
+    }
+    
+    public long Read()
+    {
+        return _value; // May read stale value
+    }
+}
+```
+
+**What happens:**
+- **Race condition**: Multiple threads incrementing `_value` simultaneously can cause lost updates
+- **Stale reads**: Thread may read stale value due to lack of memory barriers
+- **Incorrect results**: Counter may not reflect all increments
+
+**Correct approach with memory barriers:**
+
+```csharp
+// ✅ Good: Correct memory ordering with Interlocked
+public class GoodLockFreeCounter
+{
+    private long _value = 0;
+    
+    public void Increment()
+    {
+        Interlocked.Increment(ref _value); // Atomic operation with memory barrier
+    }
+    
+    public long Read()
+    {
+        return Interlocked.Read(ref _value); // Atomic read with memory barrier
+    }
+}
+```
+
+**What happens:**
+- **Atomic operations**: `Interlocked` methods use atomic CPU instructions
+- **Memory barriers**: Atomic operations include memory barriers ensuring visibility
+- **Correct results**: All increments are visible to all threads
+
+**Key insight**: Lock-free algorithms must use atomic operations with proper memory ordering to ensure correctness. Memory barriers ensure that operations are visible to other threads in the correct order.
+
+### Example scenarios (behind the scenes)
+
+#### Scenario 1: High-contention counter
+
+**Problem**: Multiple threads frequently increment a shared counter. Using locks causes high contention and reduces throughput.
+
+**Bad approach** (locks - what happens internally):
+
+```csharp
+// ❌ Bad: Locks with high contention
+public class LockBasedCounter
+{
+    private long _value = 0;
+    private readonly object _lock = new object();
+    
+    public void Increment()
+    {
+        lock (_lock) // High contention: 10 threads competing for lock
+        {
+            _value++;
+        }
+    }
+}
+```
+
+**Internal process per increment:**
+1. Thread attempts to acquire lock
+2. If lock held: Thread blocks, waiting for lock
+3. When lock acquired: Thread increments value
+4. Thread releases lock
+5. Other waiting threads compete for lock
+
+**Good approach** (lock-free - what happens internally):
+
+```csharp
+// ✅ Good: Lock-free with Interlocked
+public class LockFreeCounter
+{
+    private long _value = 0;
+    
+    public void Increment()
+    {
+        Interlocked.Increment(ref _value); // Atomic operation, no lock
+    }
+}
+```
+
+**Internal process per increment:**
+1. CPU executes atomic `LOCK INC` instruction
+2. Instruction atomically reads, increments, and writes value
+3. Memory barrier ensures visibility to other threads
+4. No blocking, no lock acquisition/release
+
+**Results**:
+- **Bad**: High contention, blocking, 2000 ops/sec with 10 threads
+- **Good**: No contention, no blocking, 4000 ops/sec with 10 threads (100% faster)
+- **Improvement**: 100% faster throughput, eliminated blocking, eliminated lock contention
+
+#### Scenario 2: Lock-free stack
+
+**Problem**: Multiple threads push and pop items from a stack. Using locks causes contention.
+
+**Bad approach** (locks - what happens internally):
+
+```csharp
+// ❌ Bad: Locks for stack operations
+public class LockBasedStack<T>
+{
+    private readonly Stack<T> _stack = new Stack<T>();
+    private readonly object _lock = new object();
+    
+    public void Push(T item)
+    {
+        lock (_lock) // Contention: multiple threads competing for lock
+        {
+            _stack.Push(item);
+        }
+    }
+}
+```
+
+**Internal process per push:**
+1. Thread attempts to acquire lock
+2. If lock held: Thread blocks
+3. When lock acquired: Thread pushes item to stack
+4. Thread releases lock
+
+**Good approach** (lock-free - what happens internally):
+
+```csharp
+// ✅ Good: Lock-free stack
+public class LockFreeStack<T>
+{
+    private volatile Node _head;
+    
+    public void Push(T item)
+    {
+        var newNode = new Node { Value = item };
+        Node currentHead;
+        do
+        {
+            currentHead = _head; // Read current head
+            newNode.Next = currentHead; // Set new node's next to current head
+        } while (Interlocked.CompareExchange(ref _head, newNode, currentHead) != currentHead);
+        // Retry if CAS failed (another thread modified head)
+    }
+}
+```
+
+**Internal process per push:**
+1. Read current head of stack
+2. Create new node pointing to current head
+3. Attempt CAS to atomically update head to new node
+4. If CAS succeeds: New node is at head, done
+5. If CAS fails: Another thread modified head, retry from step 1
+
+**Results**:
+- **Bad**: High contention, blocking, 1000 ops/sec with 10 threads
+- **Good**: No contention, no blocking, 3000 ops/sec with 10 threads (200% faster)
+- **Improvement**: 200% faster throughput, eliminated blocking, eliminated lock contention
+
+#### Scenario 3: Reference counting with Interlocked
+
+**Problem**: Reference counting requires atomic increment/decrement operations. Using locks causes contention.
+
+**Bad approach** (locks - what happens internally):
+
+```csharp
+// ❌ Bad: Locks for reference counting
+public class LockBasedRefCounted
+{
+    private int _refCount = 0;
+    private readonly object _lock = new object();
+    
+    public void AddRef()
+    {
+        lock (_lock) // Contention: multiple threads competing for lock
+        {
+            _refCount++;
+        }
+    }
+}
+```
+
+**Internal process per AddRef:**
+1. Thread attempts to acquire lock
+2. If lock held: Thread blocks
+3. When lock acquired: Thread increments reference count
+4. Thread releases lock
+
+**Good approach** (lock-free - what happens internally):
+
+```csharp
+// ✅ Good: Lock-free reference counting with Interlocked
+public class LockFreeRefCounted
+{
+    private int _refCount = 0;
+    
+    public void AddRef()
+    {
+        Interlocked.Increment(ref _refCount); // Atomic operation, no lock
+    }
+}
+```
+
+**Internal process per AddRef:**
+1. CPU executes atomic `LOCK INC` instruction
+2. Instruction atomically reads, increments, and writes reference count
+3. Memory barrier ensures visibility to other threads
+4. No blocking, no lock acquisition/release
+
+**Results**:
+- **Bad**: High contention, blocking, 1500 ops/sec with 10 threads
+- **Good**: No contention, no blocking, 4500 ops/sec with 10 threads (200% faster)
+- **Improvement**: 200% faster throughput, eliminated blocking, eliminated lock contention
+
+### When to use locks vs. lock-free algorithms
+
+**Use locks when:**
+
+- **Low contention scenarios** (few threads, infrequent access). Example: Counter accessed by 2-3 threads occasionally. Locks are simpler and sufficient.
+
+- **Complex operations** (operations that are difficult to make lock-free). Example: Complex data structure operations requiring multiple steps. Locks provide simpler synchronization.
+
+- **Correctness is more important than performance** (systems where correctness is critical). Example: Financial systems, safety-critical systems. Locks are easier to verify and debug.
+
+- **Simple code is preferred** (maintainability over performance). Example: Prototypes, non-critical code. Locks are easier to understand and maintain.
+
+- **Limited expertise** (team lacks expertise in lock-free programming). Example: Team doesn't understand memory ordering, CAS operations. Locks are safer and easier to use.
+
+- **Debugging is critical** (systems where debugging is important). Example: Systems requiring easy debugging. Locks are easier to debug than lock-free algorithms.
+
+**Use lock-free algorithms when:**
+
+- **High contention scenarios** (many threads, frequent access). Example: Counter accessed by 10+ threads frequently. Lock-free algorithms eliminate contention.
+
+- **Locks are a bottleneck** (profiling shows lock contention). Example: Lock contention is limiting throughput. Lock-free algorithms eliminate lock contention.
+
+- **Very high-performance systems** (systems requiring maximum performance). Example: High-frequency trading, real-time systems. Lock-free algorithms provide better performance.
+
+- **Maximum scalability needed** (systems that must scale with thread count). Example: Multi-core servers processing millions of requests. Lock-free algorithms scale better.
+
+- **Simple atomic operations** (increment, decrement, compare-and-swap). Example: Counters, flags, simple state updates. Lock-free algorithms work well for simple operations.
+
+- **Deadlock prevention critical** (systems where deadlocks are unacceptable). Example: Critical systems where deadlocks would be catastrophic. Lock-free algorithms can't cause deadlocks.
+
+**Decision guideline:**
+- **Low contention (< 5 threads, occasional access)**: Use locks (simpler, sufficient)
+- **Medium contention (5-10 threads, frequent access)**: Consider lock-free if locks are bottleneck
+- **High contention (> 10 threads, very frequent access)**: Use lock-free algorithms (better performance)
+- **Complex operations**: Use locks (easier to implement correctly)
+- **Simple operations**: Use lock-free (Interlocked methods)
+
+### Difference between blocking (locks) and retries (lock-free)
+
+**Blocking with locks (what happens):**
+
+```csharp
+// Lock-based approach
+lock (_lock) // Thread blocks here if lock is held
+{
+    _value++; // Critical section
+}
+```
+
+**What happens when thread blocks:**
+
+1. **Thread enters blocked state**: Thread is put to sleep by the OS
+2. **Context switch**: OS switches to another thread (expensive operation)
+3. **CPU cycles wasted**: Thread doesn't execute any code while blocked
+4. **Wake up when lock available**: OS wakes thread when lock is released
+5. **Another context switch**: OS switches back to the thread (expensive operation)
+
+**Performance cost:**
+- **Context switching overhead**: Each context switch costs ~1-10 microseconds
+- **CPU cycles wasted**: Thread doesn't execute code while blocked
+- **Memory overhead**: OS maintains blocked thread state
+- **Unpredictable latency**: Blocking time depends on when lock is released (unpredictable)
+
+**Example**: 10 threads competing for lock:
+- Thread 1: Acquires lock, executes
+- Threads 2-10: **Block** (put to sleep by OS)
+- Thread 1: Releases lock
+- OS wakes one thread (e.g., Thread 2)
+- Thread 2: Acquires lock, executes
+- Threads 3-10: Still **blocked** (waiting)
+- **Result**: Only 1 thread executes at a time, 9 threads are blocked (wasting CPU cycles)
+
+**Retries with lock-free (what happens):**
+
+```csharp
+// Lock-free approach
+do
+{
+    currentHead = _head; // Read current value
+    newNode.Next = currentHead;
+} while (Interlocked.CompareExchange(ref _head, newNode, currentHead) != currentHead);
+// Retry if CAS failed (another thread modified head)
+```
+
+**What happens when CAS fails (retry needed):**
+
+1. **CAS operation fails**: Another thread modified the value between read and CAS
+2. **Thread continues executing**: Thread doesn't block, continues in the same CPU cycle
+3. **Immediate retry**: Thread immediately retries the operation (reads new value, attempts CAS again)
+4. **No context switch**: Thread stays active, no OS intervention needed
+5. **Eventually succeeds**: When CAS succeeds (no other thread modifies value), operation completes
+
+**Performance cost:**
+- **CPU cycles used**: Thread uses CPU cycles for retries (but still executing code)
+- **No context switching**: No OS intervention, no context switch overhead
+- **Predictable latency**: Retry time is predictable (depends on CPU speed, not OS scheduling)
+- **Better CPU utilization**: Thread continues executing instead of blocking
+
+**Example**: 10 threads pushing to lock-free stack:
+- Thread 1: Reads head, attempts CAS → **Succeeds** (head updated)
+- Thread 2: Reads head, attempts CAS → **Fails** (head changed by Thread 1)
+  - Thread 2: **Immediately retries** (reads new head, attempts CAS again) → **Succeeds**
+- Thread 3: Reads head, attempts CAS → **Fails** (head changed by Thread 2)
+  - Thread 3: **Immediately retries** → **Succeeds**
+- **Result**: All threads make progress, retries happen quickly (nanoseconds), no blocking
+
+**Key differences:**
+
+| Aspect | Blocking (Locks) | Retries (Lock-Free) |
+|--------|------------------|---------------------|
+| **Thread state** | Blocked (sleeping, not executing) | Active (executing retry loop) |
+| **Context switch** | Yes (expensive, ~1-10 µs) | No (no OS intervention) |
+| **CPU cycles** | Wasted (thread doesn't execute) | Used (thread executes retry code) |
+| **Latency** | Unpredictable (depends on OS scheduling) | Predictable (depends on CPU speed) |
+| **Throughput** | Lower (only 1 thread executes at a time) | Higher (multiple threads can make progress) |
+| **Scalability** | Poor (contention increases with threads) | Better (retries are fast, contention is low) |
+| **When contention is high** | Many threads blocked (wasting CPU) | Many threads retrying (using CPU efficiently) |
+
+**Why retries are better than blocking:**
+
+1. **No context switching**: Retries don't require OS intervention, avoiding expensive context switches
+2. **Better CPU utilization**: Threads continue executing instead of sleeping
+3. **Predictable latency**: Retry time is predictable (nanoseconds) vs. blocking time (microseconds to milliseconds)
+4. **Better scalability**: Multiple threads can make progress concurrently, retries are fast
+5. **Lower overhead**: Retry loop is just a few CPU instructions vs. context switch overhead
+
+**When retries become a problem:**
+
+- **Very high contention**: If many threads retry simultaneously, CPU cache contention can occur
+- **Excessive retries**: If CAS fails many times, retry loop wastes CPU cycles (but still better than blocking)
+- **Solution**: Use exponential backoff or other techniques to reduce retry contention
+
+**Key insight**: Blocking puts threads to sleep (wasting CPU cycles), while retries keep threads active (using CPU cycles efficiently). Retries are much faster (nanoseconds) than blocking (microseconds to milliseconds), making lock-free algorithms better for high-contention scenarios.
+
+### Key takeaways
+
+- **Use for**: Lock-free data structures, when locks are a bottleneck, very high-performance systems, maximum scalability needed, simple atomic operations, deadlock prevention critical
+- **Avoid when**: Simple scenarios (low contention), low-contention cases, correctness is more important than performance, complex operations, limited expertise, debugging is difficult
+- **Internal process**: Lock-free algorithms use atomic CPU instructions (CAS, atomic increment) instead of locks. Atomic operations include memory barriers to ensure visibility. Retry loops handle contention by retrying when CAS fails.
+- **Performance cost**: Locks cause blocking, contention, serialization, context switching. Lock-free algorithms eliminate blocking but may retry operations.
+- **Performance benefit**: Lock-free algorithms provide 20%–100% better performance in high-contention scenarios, better scalability, no deadlocks, reduced contention.
+- **Typical improvements**: 20%–100% faster than locks in high-contention scenarios, 50%–200% better scalability with many threads, 50%–90% less contention, 20%–40% better CPU utilization.
+- **Trade-off**: Lock-free algorithms are very complex to implement correctly, difficult to debug, can have subtle bugs, require deep knowledge. May not be faster in low-contention scenarios.
+- **Important**: Use Interlocked methods for simple operations, use existing lock-free data structures for complex operations, avoid implementing complex lock-free algorithms without expertise. Always measure to verify improvement.
+
+---
+
+## Use Thread Pools for Concurrent Work
+
+Thread pools reuse threads instead of creating new ones, reducing the overhead of thread creation/destruction and improving performance. Thread pools can improve performance by 10x to 100x compared to manually creating threads. Thread pools automatically manage thread lifecycle, scale based on workload, and optimize resource utilization. Typical improvements: 10x to 100x faster than manual thread creation, reduced overhead, better resource utilization, automatic scalability.
+
+### How thread pools work (behind the scenes)
+
+**How manual thread creation works (for comparison):**
+
+```csharp
+public void ProcessItems(List<Item> items)
+{
+    foreach (var item in items)
+    {
+        var thread = new Thread(() => ProcessItem(item));
+        thread.Start(); // Create new thread for each item
+    }
+}
+```
+
+**What happens internally:**
+
+1. **Thread creation**: `new Thread()` allocates memory for thread object
+2. **OS thread creation**: OS creates kernel thread object, allocates stack space (~1 MB)
+3. **Thread registration**: OS registers thread in scheduler
+4. **Thread start**: Thread starts executing work
+5. **Thread completion**: Thread finishes work and is destroyed
+6. **Resource cleanup**: OS cleans up thread resources
+
+**Performance characteristics:**
+- **High overhead**: Thread creation takes ~100–1000 microseconds
+- **Memory overhead**: Each thread consumes ~1 MB of stack space
+- **Resource exhaustion**: Too many threads can exhaust system resources
+- **Poor scalability**: Performance degrades as thread count increases
+
+**How thread pools work:**
+
+```csharp
+public void ProcessItems(List<Item> items)
+{
+    foreach (var item in items)
+    {
+        ThreadPool.QueueUserWorkItem(_ => ProcessItem(item)); // Queue work to thread pool
+    }
+}
+```
+
+**What happens internally:**
+
+1. **Work item queued**: Work item is added to thread pool queue (fast, ~1 microsecond)
+2. **Thread pool thread picks up work**: Available thread pool thread picks up work item
+3. **Work execution**: Thread executes work item
+4. **Thread reuse**: Thread returns to pool after work completes, ready for next work item
+5. **Automatic scaling**: Thread pool creates more threads if work queues up, reduces threads if work decreases
+
+**Performance characteristics:**
+- **Low overhead**: Queueing work is fast (~1 microsecond)
+- **Thread reuse**: Threads are reused, eliminating creation overhead
+- **Automatic scaling**: Thread pool adjusts thread count based on workload
+- **Resource efficient**: Thread pool limits thread count, preventing resource exhaustion
+
+**Key insight**: Thread pools reuse threads instead of creating new ones, eliminating thread creation overhead and improving performance by 10x to 100x.
+
+### Technical details: Thread pool architecture
+
+**Thread pool components:**
+
+```
+Thread Pool
+├── Work Queue (FIFO queue of work items)
+├── Thread Pool Threads (pre-created threads waiting for work)
+├── Thread Pool Manager (creates/destroys threads based on workload)
+└── Thread Pool Settings (min/max threads, etc.)
+```
+
+**How work items are processed:**
+
+1. **Work item queued**: `ThreadPool.QueueUserWorkItem(...)` adds work item to queue
+2. **Thread picks up work**: Available thread pool thread dequeues work item
+3. **Work execution**: Thread executes work item
+4. **Thread returns to pool**: Thread returns to pool after work completes
+5. **Repeat**: Thread picks up next work item from queue
+
+**Thread pool scaling:**
+
+- **Work queues up**: Thread pool creates more threads (up to max threads)
+- **Work decreases**: Thread pool reduces threads (down to min threads)
+- **Automatic adjustment**: Thread pool continuously adjusts based on workload
+
+**Thread pool limits:**
+
+- **Min threads**: Minimum number of threads in pool (default: number of CPU cores)
+- **Max threads**: Maximum number of threads in pool (default: varies by .NET version)
+- **Work queue**: Unlimited work items can be queued (memory permitting)
+
+**Key insight**: Thread pools automatically manage thread lifecycle and scale based on workload, providing optimal performance without manual management.
+
+### Technical details: Task and async/await integration
+
+**How Task uses thread pools:**
+
+```csharp
+public async Task ProcessItemsAsync(List<Item> items)
+{
+    await Task.WhenAll(items.Select(item => Task.Run(() => ProcessItem(item))));
+}
+```
+
+**What happens internally:**
+
+1. **Task.Run()**: Creates a Task and queues work to thread pool
+2. **Thread pool execution**: Thread pool thread executes the work
+3. **Async/await**: `await` doesn't block thread, allows other work to execute
+4. **Completion**: Task completes when work finishes
+
+**Thread pool integration:**
+
+- **Task.Run()**: Uses thread pool for CPU-bound work
+- **Async I/O**: Uses I/O completion ports (not thread pool threads) for I/O-bound work
+- **Automatic scheduling**: .NET runtime automatically schedules tasks on thread pool
+
+**Key insight**: Tasks and async/await are built on top of thread pools, providing a modern, efficient way to use thread pools.
+
+### Why manual thread creation becomes a bottleneck
+
+**Thread creation overhead**: Creating threads is expensive (~100–1000 microseconds per thread). Example: Creating 1000 threads = 100–1000 ms overhead = poor performance.
+
+**Memory overhead**: Each thread consumes ~1 MB of stack space. Example: 1000 threads = 1000 MB memory = memory pressure = performance degradation.
+
+**OS resource limits**: OS has limits on number of threads per process. Example: Windows default limit = 2000 threads per process. Creating too many threads hits limits.
+
+**Context switching overhead**: Many threads cause frequent context switches, wasting CPU cycles. Example: 1000 threads = frequent context switches = CPU overhead = reduced throughput.
+
+**Resource exhaustion**: Too many threads can exhaust system resources (memory, handles, etc.). Example: Creating 10,000 threads = resource exhaustion = system instability.
+
+**Poor scalability**: Performance degrades as thread count increases due to overhead. Example: 1 thread = 1000 ops/sec, 1000 threads = 100 ops/sec (10x slower) due to overhead.
+
+### Example scenarios (behind the scenes)
+
+#### Scenario 1: Processing multiple items concurrently
+
+**Problem**: Need to process 1000 items concurrently. Manually creating threads causes massive overhead.
+
+**Bad approach** (manual thread creation - what happens internally):
+
+```csharp
+// ❌ Bad: Manually creating threads
+public class BadThreadCreation
+{
+    public void ProcessItems(List<Item> items)
+    {
+        foreach (var item in items)
+        {
+            var thread = new Thread(() => ProcessItem(item));
+            thread.Start(); // Overhead: ~100-1000 microseconds per thread
+        }
+        // 1000 threads = 100-1000 ms overhead = poor performance
+    }
+}
+```
+
+**Internal process per thread:**
+1. `new Thread()` allocates memory for thread object
+2. OS creates kernel thread object, allocates stack space (~1 MB)
+3. OS registers thread in scheduler
+4. Thread starts executing work
+5. Thread finishes work and is destroyed
+6. OS cleans up thread resources
+
+**Good approach** (thread pool - what happens internally):
+
+```csharp
+// ✅ Good: Using thread pool
+public class GoodThreadPool
+{
+    public void ProcessItems(List<Item> items)
+    {
+        foreach (var item in items)
+        {
+            ThreadPool.QueueUserWorkItem(_ => ProcessItem(item)); // Overhead: ~1 microsecond
+        }
+        // Thread pool reuses threads = minimal overhead = better performance
+    }
+}
+```
+
+**Internal process per work item:**
+1. Work item added to thread pool queue (~1 microsecond)
+2. Available thread pool thread picks up work item
+3. Thread executes work item
+4. Thread returns to pool after work completes
+5. Thread picks up next work item from queue
+
+**Better approach** (Task with async/await - what happens internally):
+
+```csharp
+// ✅ Better: Using Task (uses thread pool internally)
+public class BestThreadPool
+{
+    public async Task ProcessItemsAsync(List<Item> items)
+    {
+        await Task.WhenAll(items.Select(item => Task.Run(() => ProcessItem(item))));
+        // Task.Run() uses thread pool = modern, efficient approach
+    }
+}
+```
+
+**Internal process per task:**
+1. `Task.Run()` creates Task and queues work to thread pool
+2. Thread pool thread executes the work
+3. `await` doesn't block thread, allows other work to execute
+4. Task completes when work finishes
+
+**Results**:
+- **Bad**: 1000 threads created = 100–1000 ms overhead, 1000 MB memory, poor performance
+- **Good**: Thread pool reuses threads = ~1 ms overhead, ~10–100 MB memory, 10x to 100x faster
+- **Better**: Task.Run() uses thread pool = modern, efficient approach, 10x to 100x faster
+- **Improvement**: 10x to 100x faster, 10x to 100x less memory, better scalability
+
+#### Scenario 2: ASP.NET Core request processing
+
+**Problem**: ASP.NET Core web API processes requests. Need efficient concurrent request handling.
+
+**How ASP.NET Core uses thread pools:**
+
+```csharp
+// ✅ Good: ASP.NET Core uses thread pools internally
+[ApiController]
+public class GoodRequestHandler : ControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> HandleRequest(Request request)
+    {
+        await ProcessRequestAsync(request); // Uses thread pool internally
+        return Ok();
+    }
+    
+    private async Task ProcessRequestAsync(Request request)
+    {
+        // Async operations use thread pool for CPU-bound work
+        await Task.Run(() => ProcessRequest(request));
+    }
+}
+```
+
+**What happens internally:**
+1. Request arrives → ASP.NET Core queues work to thread pool
+2. Thread pool thread picks up request
+3. Thread executes request handler (async/await)
+4. Thread returns to pool when request completes
+5. Thread picks up next request
+
+**Results**:
+- **ASP.NET Core uses thread pools by default**: Efficient concurrent request handling
+- **Thread reuse**: Threads are reused across requests, eliminating creation overhead
+- **Automatic scaling**: Thread pool scales based on request load
+
+#### Scenario 3: Background job processing
+
+**Problem**: Background service processes jobs. Need efficient concurrent job processing.
+
+**Bad approach** (manual threads - what happens internally):
+
+```csharp
+// ❌ Bad: Manual threads for each job
+public class BadJobProcessor
+{
+    public void ProcessJob(Job job)
+    {
+        var thread = new Thread(() => ExecuteJob(job));
+        thread.Start(); // Overhead: creating thread per job
+    }
+}
+```
+
+**Internal process per job:**
+1. `new Thread()` allocates memory
+2. OS creates kernel thread, allocates stack space
+3. Thread starts executing job
+4. Thread finishes and is destroyed
+5. OS cleans up resources
+
+**Good approach** (thread pool - what happens internally):
+
+```csharp
+// ✅ Good: Thread pool for job processing
+public class GoodJobProcessor
+{
+    public void ProcessJob(Job job)
+    {
+        ThreadPool.QueueUserWorkItem(_ => ExecuteJob(job)); // Reuses threads
+    }
+}
+```
+
+**Internal process per job:**
+1. Work item queued to thread pool (~1 microsecond)
+2. Thread pool thread picks up job
+3. Thread executes job
+4. Thread returns to pool after job completes
+
+**Better approach** (Task with async/await - what happens internally):
+
+```csharp
+// ✅ Better: Task with async/await
+public class BestJobProcessor
+{
+    public async Task ProcessJobAsync(Job job)
+    {
+        await Task.Run(() => ExecuteJob(job)); // Uses thread pool
+    }
+}
+```
+
+**Internal process per job:**
+1. `Task.Run()` queues work to thread pool
+2. Thread pool thread executes job
+3. Task completes when job finishes
+
+**Results**:
+- **Bad**: Thread creation overhead per job = poor performance
+- **Good**: Thread pool reuses threads = efficient job processing
+- **Better**: Task.Run() uses thread pool = modern, efficient approach
+- **Improvement**: 10x to 100x faster, better resource utilization, automatic scaling
+
+### Key takeaways
+
+- **Use for**: All modern .NET applications (default and recommended), short-duration tasks, async operations, server applications, CPU-bound work, concurrent work
+- **Avoid when**: Long-running background threads (rare), thread-specific requirements (rare), legacy code (consider migrating)
+- **Internal process**: Thread pools reuse pre-created threads instead of creating new ones. Work items are queued to a work queue, and thread pool threads pick up and execute work items. Threads return to pool after work completes, ready for next work item. Thread pool automatically scales based on workload.
+- **Performance cost**: Manual thread creation = ~100–1000 microseconds overhead per thread, ~1 MB memory per thread, OS resource limits, context switching overhead, resource exhaustion. Thread pools = ~1 microsecond overhead per work item, thread reuse, automatic scaling, resource efficient.
+- **Performance benefit**: Thread pools provide 10x to 100x better performance than manual thread creation, reduced overhead (100x to 1000x faster queueing), better resource utilization, automatic scalability.
+- **Typical improvements**: 10x to 100x faster than manual thread creation, 100x to 1000x less overhead for queueing work vs. creating threads, significantly less memory usage (10x to 100x less), better scalability due to automatic thread management.
+- **Trade-off**: Thread pools provide less control over individual threads, may require configuration for specific scenarios, thread pool starvation if threads are blocked, less predictable behavior, debugging complexity.
+- **Important**: Always use thread pools—they are the default and recommended approach in .NET. Use `Task.Run()` and `async/await` for modern code, prefer thread pools over manual thread creation. Tasks and async/await are built on top of thread pools, providing a modern, efficient way to use thread pools.
+
 ---
 
 

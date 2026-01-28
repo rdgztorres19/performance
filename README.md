@@ -5440,7 +5440,7 @@ public class BestStringBuilder
 
 ---
 
-### Avoid exceptions for control flow
+### Avoid exceptions for control flow (OK)
 
 **Cómo funciona:**
 Las excepciones son costosas (stack unwinding, creación de objetos). Usarlas para control de flujo normal es muy ineficiente.
@@ -6240,7 +6240,7 @@ public class BestAsync
 
 ---
 
-### Use Channels for producer-consumer scenarios
+### Use Channels for producer-consumer scenarios (OK)
 
 **Cómo funciona:**
 Channels proporcionan una forma eficiente y thread-safe de comunicación entre productores y consumidores, con backpressure automático.
@@ -6494,7 +6494,7 @@ public class BetterFineGrained
 
 ---
 
-### Prefer lock-free algorithms
+### Prefer lock-free algorithms (Ok)
 
 **Cómo funciona:**
 Los algoritmos lock-free usan operaciones atómicas (como Compare-And-Swap) en lugar de locks, eliminando bloqueos y mejorando el rendimiento.
