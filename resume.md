@@ -7653,4 +7653,252 @@ public async Task AggregateLogsAsync(string logPath, IEnumerable<string> logs)
 
 ---
 
+## Avoid Closures in Hot Paths to Reduce Allocations and GC Pressure
+
+Closures capture variables from the outer scope, creating heap-allocated objects (display classes) to maintain state. In hot paths (frequently executed code), these allocations accumulate: 1 million lambda calls with closures = 1 million allocations = increased GC pressure. Avoiding closures (by passing parameters explicitly, using static methods, or refactoring to avoid captured variables) eliminates these allocations, improving performance by 10%–30% in code with many closures. Typical improvements: 10%–30% faster in code with many closures, 50%–100% fewer allocations, 50%–90% lower GC pressure.
+
+### Why avoid closures
+
+**Accumulating allocations**: In hot paths, closures create many allocations. Example: Processing 1 million items with a closure = 1 million allocations (depending on compiler optimizations) = high GC pressure.
+
+**GC pressure**: Many allocations trigger more frequent GC collections, causing pause times. Example: 1 million allocations = frequent GC = 100–1000 ms pause times = reduced throughput.
+
+**Memory overhead**: Closure objects consume memory. Example: 1 million closure objects × 24 bytes (object overhead) = 24 MB of memory just for closures.
+
+**CPU overhead**: GC collections pause threads, wasting CPU cycles. Example: GC pause of 100 ms = 100 ms of CPU time wasted, reducing throughput.
+
+**Cache pollution**: Many small allocations can pollute the CPU cache, slowing down subsequent operations. Example: Allocating many closure objects evicts useful data from cache.
+
+### How it works
+
+**How a closure captures variables:**
+
+```csharp
+public void ProcessItems(List<Item> items, int threshold)
+{
+    // Lambda captures 'threshold' from outer scope
+    var filtered = items.Where(x => x.Value > threshold).ToList();
+}
+```
+
+**What the compiler generates (simplified):**
+
+```csharp
+// Compiler generates a display class
+private sealed class DisplayClass
+{
+    public int threshold;  // Captured variable
+    
+    public bool Method(Item x)
+    {
+        return x.Value > this.threshold;  // Uses captured variable
+    }
+}
+
+public void ProcessItems(List<Item> items, int threshold)
+{
+    // Create display class instance (allocation!)
+    var displayClass = new DisplayClass { threshold = threshold };
+    
+    // Lambda becomes a method on display class
+    var filtered = items.Where(displayClass.Method).ToList();
+}
+```
+
+**What happens:**
+1. **Compiler creates display class**: A class to hold captured variables (`threshold`)
+2. **Allocation**: `new DisplayClass()` allocates an object on the heap
+3. **Lambda becomes method**: The lambda becomes a method on the display class
+4. **GC pressure**: The allocation increases GC pressure
+
+**How avoiding closures works:**
+
+```csharp
+public void ProcessItems(List<Item> items, int threshold)
+{
+    var filtered = new List<Item>();
+    foreach (var item in items)
+    {
+        if (item.Value > threshold)  // Direct parameter use, no closure
+            filtered.Add(item);
+    }
+}
+```
+
+**What happens:**
+1. **No display class**: No captured variables, so no display class needed
+2. **No allocation**: No object allocation
+3. **Direct parameter use**: `threshold` is used directly from the stack
+4. **No GC pressure**: No allocations = no GC overhead
+
+**Key insight**: Closures create heap-allocated objects to hold captured variables. Avoiding closures eliminates these allocations, reducing GC pressure.
+
+**When closures cause allocations:**
+
+- **Closure with captured variable**: `items.Where(x => x.Value > threshold)` → captures `threshold` → creates display class → allocation
+- **Lambda without captured variables**: `items.Where(x => x.Value > 10)` → no captured variables → no display class → no allocation
+- **Multiple captured variables**: `items.Where(x => x.Value > threshold && x.Category == category)` → captures both → creates display class with both → allocation (one object holds all)
+
+**Key insight**: Any captured variable creates a display class and allocation. The number of captured variables doesn't matter (one object holds all).
+
+### Example scenarios
+
+#### Scenario 1: Hot path with LINQ and closure
+
+**Problem**: A hot path processes 1 million items using LINQ with a closure, causing many allocations.
+
+**Bad approach** (closure captures variable):
+
+```csharp
+// ❌ Bad: Closure captures 'threshold'
+public List<Item> FilterItems(List<Item> items, int threshold)
+{
+    // Lambda captures 'threshold' → creates display class → allocation
+    return items.Where(x => x.Value > threshold).ToList();
+    // 1 million items = 1 million lambda calls = potential allocations
+}
+```
+
+**Good approach** (no closure, explicit parameter):
+
+```csharp
+// ✅ Good: No closure, explicit comparison
+public List<Item> FilterItems(List<Item> items, int threshold)
+{
+    var filtered = new List<Item>();
+    foreach (var item in items)
+    {
+        if (item.Value > threshold)  // Direct comparison, no closure
+            filtered.Add(item);
+    }
+    return filtered;
+    // 1 million items = 0 closure allocations
+}
+```
+
+**Better approach** (static method to avoid closure):
+
+```csharp
+// ✅ Better: Static method, no closure possible
+private static bool IsAboveThreshold(Item item, int threshold)
+{
+    return item.Value > threshold;
+}
+
+public List<Item> FilterItems(List<Item> items, int threshold)
+{
+    var filtered = new List<Item>();
+    foreach (var item in items)
+    {
+        if (IsAboveThreshold(item, threshold))  // Static method, no closure
+            filtered.Add(item);
+    }
+    return filtered;
+}
+```
+
+**Results**:
+- **Bad**: Potential allocations from closures, GC pressure, 10%–30% slower
+- **Good**: No closure allocations, lower GC pressure, 10%–30% faster
+- **Improvement**: 10%–30% faster, reduced GC pressure
+
+#### Scenario 2: Event handler with closure
+
+**Problem**: Event handler captures variables, creating allocations on each event.
+
+**Bad approach** (closure captures variables):
+
+```csharp
+// ❌ Bad: Closure captures 'userId' and 'logger'
+public void SubscribeToEvents(EventBus bus, int userId, ILogger logger)
+{
+    bus.OnEvent += (sender, e) =>
+    {
+        // Lambda captures 'userId' and 'logger' → creates display class → allocation
+        logger.Log($"User {userId} received event: {e.Type}");
+    };
+    // Each event = potential allocation from closure
+}
+```
+
+**Good approach** (no closure, capture in class field):
+
+```csharp
+// ✅ Good: No closure, use class fields
+public class EventSubscriber
+{
+    private readonly int _userId;
+    private readonly ILogger _logger;
+    
+    public EventSubscriber(int userId, ILogger logger)
+    {
+        _userId = userId;
+        _logger = logger;
+    }
+    
+    public void SubscribeToEvents(EventBus bus)
+    {
+        bus.OnEvent += OnEventReceived;  // Method reference, no closure
+    }
+    
+    private void OnEventReceived(object sender, Event e)
+    {
+        _logger.Log($"User {_userId} received event: {e.Type}");  // Use fields, no closure
+    }
+}
+```
+
+**Results**:
+- **Bad**: Allocation per event from closure, GC pressure
+- **Good**: No closure allocations, no GC pressure
+- **Improvement**: Eliminated allocations, reduced GC pressure
+
+#### Scenario 3: Multiple LINQ queries with closures
+
+**Problem**: Hot path uses multiple LINQ queries with closures, causing many allocations.
+
+**Bad approach** (multiple closures):
+
+```csharp
+// ❌ Bad: Multiple closures capturing variables
+public List<Item> ProcessItems(List<Item> items, int minValue, int maxValue, string category)
+{
+    // Each LINQ query captures variables → multiple allocations
+    var filtered = items
+        .Where(x => x.Value > minValue)  // Closure 1: captures 'minValue'
+        .Where(x => x.Value < maxValue)  // Closure 2: captures 'maxValue'
+        .Where(x => x.Category == category)  // Closure 3: captures 'category'
+        .ToList();
+    // 3 closures = 3 potential allocations per item
+    return filtered;
+}
+```
+
+**Good approach** (single loop, no closures):
+
+```csharp
+// ✅ Good: Single loop, no closures
+public List<Item> ProcessItems(List<Item> items, int minValue, int maxValue, string category)
+{
+    var filtered = new List<Item>();
+    foreach (var item in items)
+    {
+        if (item.Value > minValue && 
+            item.Value < maxValue && 
+            item.Category == category)  // Direct comparisons, no closures
+        {
+            filtered.Add(item);
+        }
+    }
+    return filtered;
+    // 0 closures = 0 allocations
+}
+```
+
+**Results**:
+- **Bad**: 3 closures per item = many allocations, GC pressure, slower
+- **Good**: 0 closures = 0 allocations, no GC pressure, faster
+- **Improvement**: 10%–30% faster, significantly reduced allocations
+---
+
 

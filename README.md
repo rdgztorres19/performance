@@ -5285,7 +5285,7 @@ public class BestLINQ
 
 ---
 
-### Avoid closures
+### Avoid closures (OK)
 
 **Cómo funciona:**
 Las closures capturan variables del scope externo, creando objetos (allocations) para mantener el estado. Esto puede ser costoso en hot paths.
