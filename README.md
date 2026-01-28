@@ -3920,7 +3920,7 @@ public class GoodOpenClose
 
 ---
 
-### Bulk read and write operations
+### Bulk read and write operations (OK)
 
 **Cómo funciona:**
 Leer y escribir en bloques grandes reduce el número de llamadas al sistema y mejora el rendimiento al aprovechar mejor el ancho de banda.
@@ -3994,7 +3994,7 @@ public class BestBulk
 
 ---
 
-### Avoid file locks
+### Avoid file locks (OK)
 
 **Cómo funciona:**
 Los file locks pueden causar contención y bloqueos cuando múltiples procesos intentan acceder al mismo archivo, degradando el rendimiento.
