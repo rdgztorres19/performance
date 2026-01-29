@@ -6734,7 +6734,7 @@ public class BestDeadlock
 
 ---
 
-### Use thread pools
+### Use thread pools (OK)
 
 **Cómo funciona:**
 Thread pools reutilizan threads en lugar de crear nuevos, reduciendo el overhead de creación/destrucción de threads y mejorando el rendimiento.
@@ -6797,7 +6797,7 @@ public class BestThreadPool
 
 ---
 
-### Proper thread pool sizing
+### Proper thread pool sizing (OK)
 
 **Cómo funciona:**
 El tamaño del thread pool afecta el rendimiento. Muy pocos threads pueden limitar el paralelismo, mientras que demasiados pueden causar overhead.
@@ -6842,7 +6842,7 @@ public class ThreadPoolConfig
 
 ---
 
-### Use cancellation tokens
+### Use cancellation tokens (OK)
 
 **Cómo funciona:**
 Cancellation tokens permiten cancelar operaciones de manera cooperativa, evitando desperdiciar recursos en operaciones que ya no son necesarias.

@@ -9288,4 +9288,173 @@ public class GoodMixedWorkload
 
 ---
 
+## Use Cancellation Tokens for Cooperative Cancellation
+
+Cancellation tokens allow operations to be cancelled cooperatively, avoiding wasted resources on work that is no longer needed. Using cancellation tokens improves resource utilization, enables faster response to user cancellations, and prevents unnecessary work (CPU, I/O, memory). Typical benefits: better resource utilization, faster response to cancellations, better user experience, avoidance of unnecessary work.
+
+### How cancellation tokens work
+
+**Signaling cancellation:**
+```csharp
+var cts = new CancellationTokenSource();
+CancellationToken token = cts.Token;
+// Later: cts.Cancel(); // Token is now in "cancelled" state
+```
+
+**What happens:** Token source creates token → token passed to operation → `Cancel()` called (user, timeout, request abort) → token's `IsCancellationRequested` becomes true → operation checks token and stops.
+
+**Checking for cancellation:**
+```csharp
+cancellationToken.ThrowIfCancellationRequested(); // Throws OperationCanceledException if cancelled
+if (cancellationToken.IsCancellationRequested) break; // Or return
+```
+
+**Key insight:** Cancellation is cooperative. The operation must check the token; the token does not automatically stop the operation. Check the token regularly (e.g., per item in a loop) for responsive cancellation.
+
+### Passing tokens through call chains
+
+**Bad:** Token not passed → child operation cannot be cancelled (in-flight work continues).
+**Good:** Pass token to every async method in the chain; check in loops and before expensive steps. Convention: `CancellationToken` as last parameter, `= default` so callers can omit it.
+
+### Linking tokens (timeout + user cancel)
+
+```csharp
+using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(userToken, timeoutCts.Token);
+await ProcessItemsAsync(items, linkedCts.Token); // Cancels on user cancel OR timeout
+```
+
+**Key insight:** Use `CreateLinkedTokenSource` to combine multiple triggers (user, timeout, request abort).
+
+### Why ignoring cancellation is a problem
+
+- **Wasted resources:** Cancelled operations continue using CPU, I/O, memory
+- **Reduced throughput:** Resources tied up in cancelled work unavailable for other requests
+- **Poor UX:** User expects cancellation to stop work quickly
+- **Request abort not honored:** In web apps, client disconnects but server keeps working if token not passed
+- **Scalability:** Many cancelled-but-still-running operations can exhaust thread pool, connections, memory
+
+### Example scenarios
+
+#### Scenario 1: Processing a list with cancellation
+
+**Problem**: Process a large list of items; user may cancel. Without a token, work continues even after cancel.
+
+**Bad approach** (no cancellation):
+
+```csharp
+// ❌ Bad: No cancellation support
+public async Task ProcessItemsAsync(List<Item> items)
+{
+    foreach (var item in items)
+    {
+        await ProcessItemAsync(item); // Continues even if user cancelled
+    }
+}
+```
+
+**Good approach** (with cancellation token):
+
+```csharp
+// ✅ Good: Check token and pass to child operations
+public async Task ProcessItemsAsync(List<Item> items, CancellationToken cancellationToken = default)
+{
+    foreach (var item in items)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await ProcessItemAsync(item, cancellationToken);
+    }
+}
+
+public async Task ProcessItemAsync(Item item, CancellationToken cancellationToken = default)
+{
+    await SomeAsyncOperation(item, cancellationToken);
+    cancellationToken.ThrowIfCancellationRequested();
+    await AnotherAsyncOperation(item, cancellationToken);
+}
+```
+
+**Results:**
+- **Bad**: User cancels but all items are still processed = wasted work, poor UX.
+- **Good**: User cancels → token is set → next check throws → loop and child work stop = no wasted work, good UX.
+
+---
+
+#### Scenario 2: ASP.NET Core and request abort
+
+**Problem**: Long-running API action; when the client disconnects, the server should stop work.
+
+**Bad approach** (ignoring request abort):
+
+```csharp
+// ❌ Bad: Not using request cancellation token
+[HttpGet]
+public async Task<IActionResult> GetReport()
+{
+    var data = await BuildLargeReportAsync(); // No token - continues even if client disconnected
+    return Ok(data);
+}
+```
+
+**Good approach** (pass request aborted token):
+
+```csharp
+// ✅ Good: Pass request cancellation token
+[HttpGet]
+public async Task<IActionResult> GetReport(CancellationToken cancellationToken)
+{
+    // cancellationToken is typically HttpContext.RequestAborted
+    var data = await BuildLargeReportAsync(cancellationToken);
+    return Ok(data);
+}
+
+private async Task<Report> BuildLargeReportAsync(CancellationToken cancellationToken)
+{
+    var report = new Report();
+    foreach (var section in GetSections())
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        report.Add(await BuildSectionAsync(section, cancellationToken));
+    }
+    return report;
+}
+```
+
+**Results:**
+- **Bad**: Client disconnects but server keeps building the report = wasted CPU and memory.
+- **Good**: Client disconnects → request token is cancelled → report building stops = resources freed.
+
+---
+
+#### Scenario 3: User cancel with timeout
+
+**Problem**: Run an operation that should stop on user cancel or after 30 seconds.
+
+**Approach** (linked token source):
+
+```csharp
+// ✅ Good: Link user token with timeout
+public async Task ProcessWithTimeoutAsync(List<Item> items, CancellationToken userToken)
+{
+    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(userToken, timeoutCts.Token);
+
+    await ProcessItemsAsync(items, linkedCts.Token);
+}
+```
+
+**Results:** Operation stops when the user cancels or when 30 seconds have elapsed, whichever comes first. Resources are not held beyond that.
+
+### Key takeaways
+
+- **Use for:** Long-running operations, operations that can be cancelled (user, timeout, request abort), async operations whenever possible, ASP.NET Core (request lifetime), timeouts
+- **Avoid when:** Operation is very fast and cancellation unlikely (still pass token for future-proofing); API doesn't support it; operation must run to completion (document why)
+- **Rules:** Add `CancellationToken cancellationToken = default` to async methods; check in loops with `ThrowIfCancellationRequested()`; pass token to all async calls; handle `OperationCanceledException` as normal cancellation (not error)
+- **Typical benefits:** Cancelled work stops immediately (resource utilization); faster response to cancellations; better UX; honoring request abort in web apps; support for timeouts via linked tokens
+- **Trade-off:** Must check token and pass through call chains; some APIs don't accept tokens
+- **Common mistakes:** Not passing token to child calls; not checking token in loops; ignoring cancellation in async methods; treating `OperationCanceledException` as error; not linking tokens for timeout; forgetting request aborted in ASP.NET Core
+- **Important:** In ASP.NET Core, use the request's cancellation token so client disconnect stops server-side work. Pass and check cancellation tokens in async code when cancellation is possible.
+
+---
+
 
