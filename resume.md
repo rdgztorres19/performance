@@ -9457,4 +9457,599 @@ public async Task ProcessWithTimeoutAsync(List<Item> items, CancellationToken us
 
 ---
 
+## Use Throttling and Rate Limiting to Prevent Overload and Improve Stability
 
+Throttling and rate limiting control the rate of operations (requests, calls, messages), preventing overload and improving system stability. By limiting how many operations are allowed per time window, you protect backends, databases, and external APIs from being overwhelmed. Typical benefits: prevents overload, better stability, protects resources, better UX under load.
+
+### Key concepts
+
+- **Throttling**: Limiting the rate at which operations are processed (slow down or reject excess).
+- **Rate limiting**: Enforcing a maximum number of operations per time window; excess rejected or delayed.
+- **Token bucket**: Algorithm with a bucket of tokens (e.g., 100 max); each op consumes 1 token; tokens refill at a fixed rate (e.g., 10/sec); allows burst then sustained rate.
+- **Sliding window**: Counts operations in a rolling window (e.g., last 1 sec); smooth limit, no fixed boundary reset.
+- **Fixed window**: Counts operations in non-overlapping windows (e.g., per minute); simpler but can allow bursts at boundaries.
+- **429 Too Many Requests**: HTTP status for rate limit exceeded; clients should retry after delay.
+- **Backpressure**: System signals producers to slow down; rate limiting is one form (reject or delay).
+
+### How rate limiting works
+
+**Token bucket (conceptual):** Request arrives → consume 1 token; if tokens > 0 allow, else reject (or wait). Tokens refill at fixed rate; max tokens = burst capacity.
+
+**Sliding window (conceptual):** Request arrives → count requests in last 1 second; if count < limit allow, else reject. Window slides so limit is over any 1-second period.
+
+**.NET (ASP.NET Core 7+):** `SlidingWindowRateLimiter`, `TokenBucketRateLimiter`, `FixedWindowRateLimiter` in `System.Threading.RateLimiting`. Use `AcquireAsync()` → check `lease.IsAcquired` → process or return 429.
+
+### Why skipping rate limiting is a problem
+
+- **Overload**: Unlimited requests overwhelm backend (DB, CPU, connections).
+- **Cascading failure**: One overloaded component can bring down the system.
+- **No fairness**: One client can consume all resources.
+- **Unpredictable performance**: Latency and errors spike under load with no bound.
+- **Poor UX**: When overloaded, everyone gets slow or failed responses; with rate limiting, accepted requests stay responsive.
+
+### Example scenarios
+
+#### Scenario 1: Public API with per-user rate limit
+
+**Problem**: Public API must stay stable under traffic spikes and prevent any single user from consuming all capacity.
+
+**Bad approach** (no rate limiting):
+
+```csharp
+// ❌ Bad: No rate limiting
+[HttpGet("items")]
+public async Task<IActionResult> GetItems()
+{
+    var items = await _db.GetItemsAsync();
+    return Ok(items);
+}
+```
+
+**Good approach** (sliding window per user):
+
+```csharp
+// ✅ Good: Rate limit per user (e.g., via middleware or endpoint filter)
+[HttpGet("items")]
+[EnableRateLimiting("PerUser")]
+public async Task<IActionResult> GetItems()
+{
+    var items = await _db.GetItemsAsync();
+    return Ok(items);
+}
+// Configure "PerUser" policy: e.g., 100 requests per minute per user
+```
+
+**Results:**
+- **Bad**: Traffic spike or abusive user can overload the database.
+- **Good**: Each user capped (e.g., 100/min); excess get 429; system stays stable.
+
+---
+
+#### Scenario 2: Protecting a backend with global limit
+
+**Problem**: Backend service can handle 500 req/sec; front-end must not send more.
+
+**Bad approach** (no throttling):
+
+```csharp
+// ❌ Bad: Send all requests to backend
+public async Task<Response> CallBackendAsync(Request req)
+{
+    return await _httpClient.PostAsync(_backendUrl, req); // No limit
+}
+```
+
+**Good approach** (global rate limiter):
+
+```csharp
+// ✅ Good: Throttle outgoing requests
+private readonly RateLimiter _limiter = new SlidingWindowRateLimiter(
+    new SlidingWindowRateLimiterOptions
+    {
+        PermitLimit = 500,
+        Window = TimeSpan.FromSeconds(1)
+    });
+
+public async Task<Response> CallBackendAsync(Request req)
+{
+    using var lease = await _limiter.AcquireAsync();
+    if (!lease.IsAcquired)
+        throw new RateLimitExceededException("Backend limit reached");
+    return await _httpClient.PostAsync(_backendUrl, req);
+}
+```
+
+**Results:**
+- **Bad**: Burst of 2000 req/sec can overwhelm backend.
+- **Good**: At most 500 req/sec sent; backend stays within capacity.
+
+---
+
+#### Scenario 3: Consuming an external API with rate limit
+
+**Problem**: External API allows 100 calls per minute; your app must not exceed that.
+
+**Approach** (outgoing rate limit):
+
+```csharp
+// ✅ Good: Limit outgoing calls to external API
+private readonly RateLimiter _limiter = new FixedWindowRateLimiter(
+    new FixedWindowRateLimiterOptions
+    {
+        PermitLimit = 100,
+        Window = TimeSpan.FromMinutes(1)
+    });
+
+public async Task<ExternalData> FetchFromExternalApiAsync(string id)
+{
+    using var lease = await _limiter.AcquireAsync();
+    if (!lease.IsAcquired)
+        throw new RateLimitExceededException("External API limit reached; retry later.");
+    return await _externalHttpClient.GetAsync($"/data/{id}");
+}
+```
+
+**Results:** Outgoing calls stay under 100/minute; you avoid being throttled or banned by the provider.
+
+### Key takeaways
+
+- **Use for:** Public APIs, resource-limited systems, backend protection, consuming external APIs, fairness (per-user/per-tenant).
+- **Avoid aggressive limiting when:** Maximum throughput is required and resources can handle it; traffic is fully trusted and controlled.
+- **Trade-off:** Caps maximum throughput; can reject valid requests when limit exceeded; requires configuration and tuning.
+- **Typical impact:** Prevents overload and cascading failure (stability); caps throughput at limit; minimal latency for accepted requests; rejected get 429 and save server work.
+- **Common mistakes:** No rate limiting on public APIs; limits too strict or too loose; not returning 429 (or Retry-After); one global limit only (consider per-user); ignoring limits when calling external APIs.
+- **Important:** Tune limits from capacity and load tests; use metrics (request rate, reject rate, latency). Rate limiting is about stability and fairness, not making the happy path faster.
+
+---
+
+## Use Connection Pooling for Network and Database Connections
+
+Connection pooling reuses existing connections instead of creating new ones per request, reducing connection overhead and improving performance. Creating a new connection involves TCP handshake, TLS negotiation, and often authentication—each step adds latency and CPU cost. Pooling can improve performance by 10x to 100x compared to creating new connections per request. Use it for HTTP clients, database connections, and any high-throughput network communication. Trade-off: pools require configuration (min/max size, timeouts) and can hold idle connections.
+
+### Key concepts
+
+- **Connection**: A logical or physical channel between client and server (e.g., TCP). Data is sent over it; when done, it can be closed or kept open for reuse.
+- **Connection overhead**: Time and resources to establish a connection (TCP handshake, TLS handshake, auth). Paid once per new connection (e.g., 50–200 ms for HTTPS).
+- **TCP handshake**: Three-way exchange (SYN, SYN-ACK, ACK) to establish a TCP connection; typically one RTT.
+- **TLS handshake**: Exchange for secure (HTTPS) connection: protocol version, certificates, key exchange; often 1–2 RTTs.
+- **Connection pooling**: Keeping a set of established connections (a pool) and reusing them for multiple requests instead of creating a new connection per request.
+- **Keep-alive**: Mechanism that keeps a TCP connection open after an HTTP request/response so it can be reused. Without keep-alive, the server closes after each response and the client needs a new connection every time. In HTTP/1.1, persistent connections (keep-alive) are the default; in HTTP/1.0, client sends `Connection: keep-alive`. Pooling depends on keep-alive: the pool holds connections that stay open between requests.
+- **Socket exhaustion**: Running out of available sockets (e.g., ephemeral ports) because too many connections were created and not closed; can cause "cannot assign requested address."
+- **IHttpClientFactory**: .NET service that creates and manages `HttpClient` instances and their underlying connection pools per host; use instead of `new HttpClient()`.
+- **Connection string**: String describing how to connect to a resource (e.g., DB server, database, credentials). ADO.NET uses it and, by default, pools by connection string.
+
+### How connection pooling works
+
+**Without pooling:** Request → new TCP connection → TLS handshake → send request → response → close connection. Cost per request: full connection setup + request/response.
+
+**With pooling:** Request → take connection from pool (or create if under max) → send request → response → return connection to pool. Cost per request: small pool lookup + request/response; connection setup only when pool grows.
+
+**Behind the scenes:**
+1. Pool maintains a set of open connections (to a host or database).
+2. Application asks for a connection; pool returns an idle one or creates a new one (if under max).
+3. Request is sent over the connection; response is read.
+4. Connection is returned to the pool (not closed) for reuse.
+5. Pool has min/max size and often a timeout for idle connections.
+
+**Keep-alive behind the scenes (HTTP):** Pooling for HTTP only works because connections are kept open between requests (keep-alive). Without keep-alive: server closes after each response → next request needs a new TCP connection → no reuse. With keep-alive (HTTP/1.1 default): after the response the connection stays open; the next request uses the same TCP connection, no new handshake. Both sides keep the socket open; the client’s pool holds these keep-alive connections and hands them out for new requests. Idle keep-alive connections are closed after a timeout (e.g. server 60–120 s); the pool may create a new connection on next request. Keep-alive is the protocol-level “don’t close after this response”; pooling is the application-level “maintain a set of those open connections and reuse them.” Pooling relies on keep-alive.
+
+### Keep-Alive Behind the Scenes (Why Pooling Works for HTTP)
+
+Connection pooling for HTTP only works because connections are *kept open* between requests. That is what **keep-alive** does.
+
+**Without keep-alive (HTTP/1.0-style):**
+- Client sends request → server sends response → server closes the TCP connection.
+- Next request: client must open a new TCP connection (handshake again). No reuse, so there is nothing to pool.
+
+**With keep-alive (HTTP/1.1 default, persistent connections):**
+- Client sends request → server sends response → **connection stays open** (not closed).
+- Next request: client sends another request on the **same** TCP connection; no new handshake.
+- The connection is only closed after a timeout (idle) or when either side sends `Connection: close`.
+
+**Behind the scenes:**
+1. **Protocol**: In HTTP/1.1, the connection is persistent unless `Connection: close` is sent. The server does not close after each response; the client can send multiple requests on the same connection (often pipelined or one-after-one). In HTTP/1.0, the client explicitly sends `Connection: keep-alive` in the request and the server may include `Connection: keep-alive` in the response to agree.
+2. **Who keeps it open?** Both sides keep the TCP socket open. The client does not call close after reading the response; the server does not close after sending the response. So the same TCP connection carries request 1, response 1, request 2, response 2, …
+3. **Relationship to pooling**: The client’s connection pool (e.g., `SocketsHttpHandler` in .NET) holds these *keep-alive* connections. When you need to send a request, the pool gives you an existing open connection instead of creating a new one. Without keep-alive, every request would close the connection and the pool would have nothing to reuse.
+4. **Timeouts**: Idle keep-alive connections are closed after a timeout (e.g., server-side 60–120 seconds) to free resources. The pool may create a new connection when the next request arrives. Pool configuration (e.g., max idle time) aligns with these timeouts.
+
+**Summary:** Keep-alive is the protocol-level behavior (“don’t close the connection after this response”). Connection pooling is the application-level strategy (“maintain a set of those open connections and reuse them”). Pooling relies on keep-alive; without it, HTTP would be one-request-per-connection and pooling would not help.
+
+**HTTP in .NET:** `IHttpClientFactory` creates `HttpClient` instances that share a common `SocketsHttpHandler` per named client. `SocketsHttpHandler` maintains a connection pool per endpoint (scheme + host + port). Use `IHttpClientFactory.CreateClient(...)` in production so pooling and lifetime are managed.
+
+**Database in .NET:** ADO.NET providers (e.g., SQL Server) use connection pooling by default. Same connection string shares a pool; different strings get different pools. `Open()` takes one from the pool; `Dispose()`/`Close()` returns it to the pool (connection is not closed at the network level). EF Core uses the underlying ADO.NET provider and its pooling.
+
+### Why creating a new connection per request is a problem
+
+- **Connection overhead**: Each new connection pays TCP + TLS (and often auth). Example: 100 ms per connection × 1000 requests = 100 seconds spent only on connection setup.
+- **Socket exhaustion**: OS has limited ephemeral ports; creating and closing many connections can exhaust them.
+- **Server load**: Each new connection consumes server resources (memory, file descriptors); too many short-lived connections overload the server.
+- **Latency**: Handshakes add round trips (e.g., 2 RTTs → 40 ms extra per request on a 20 ms RTT link).
+- **Throughput**: Time in setup/teardown is time not spent sending requests; pooling can increase effective throughput 10x–100x.
+
+### Example scenarios
+
+#### Scenario 1: HTTP API client
+
+**Problem**: Service calls an external API for every request; creating a new `HttpClient` per call causes high latency and socket exhaustion under load.
+
+**Bad approach** (new HttpClient per request):
+
+```csharp
+// ❌ Bad: New HttpClient per request
+public async Task<ApiResponse> GetDataAsync(string id)
+{
+    using var client = new HttpClient();
+    var response = await client.GetAsync($"https://api.example.com/data/{id}");
+    return await response.Content.ReadFromJsonAsync<ApiResponse>();
+}
+```
+
+**Good approach** (IHttpClientFactory / pooled):
+
+```csharp
+// ✅ Good: Use IHttpClientFactory for connection pooling
+public class ApiClient
+{
+    private readonly IHttpClientFactory _httpClientFactory;
+
+    public ApiClient(IHttpClientFactory httpClientFactory)
+    {
+        _httpClientFactory = httpClientFactory;
+    }
+
+    public async Task<ApiResponse> GetDataAsync(string id)
+    {
+        var client = _httpClientFactory.CreateClient("ExternalApi");
+        var response = await client.GetAsync($"/data/{id}");
+        return await response.Content.ReadFromJsonAsync<ApiResponse>();
+    }
+}
+// Registration: services.AddHttpClient("ExternalApi", c => c.BaseAddress = new Uri("https://api.example.com"));
+```
+
+**Results:**
+- **Bad**: Each request pays connection cost; under load, socket exhaustion and high latency.
+- **Good**: Connections reused; lower latency, higher throughput, no socket exhaustion.
+
+---
+
+#### Scenario 2: Database access
+
+**Problem**: Each operation opens a new connection; connection overhead and risk of exhausting connections.
+
+**Bad approach** (new connection every time, fragile pattern):
+
+```csharp
+// ❌ Bad: New connection every time (still pooled by ADO.NET, but pattern is fragile)
+public async Task<User> GetUserAsync(int id)
+{
+    var connectionString = Configuration.GetConnectionString("Default");
+    var connection = new SqlConnection(connectionString);
+    await connection.OpenAsync();
+    try
+    {
+        // ... query ...
+    }
+    finally
+    {
+        await connection.CloseAsync();
+    }
+}
+```
+
+**Good approach** (single connection string, proper using → ADO.NET pool used):
+
+```csharp
+// ✅ Good: Single connection string, proper using → ADO.NET pool is used
+public class UserRepository
+{
+    private readonly string _connectionString;
+
+    public UserRepository(IConfiguration configuration)
+    {
+        _connectionString = configuration.GetConnectionString("Default");
+    }
+
+    public async Task<User> GetUserAsync(int id)
+    {
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync(); // From pool
+        // ... query ...
+        // Dispose returns connection to pool
+    }
+}
+```
+
+**Results:**
+- **Bad**: If connection string is recreated or connections are not disposed, pooling may be ineffective or connections leak.
+- **Good**: Same connection string and proper disposal; ADO.NET pool is used; 10x–100x better under load.
+
+---
+
+#### Scenario 3: Typed HttpClient with pooling
+
+**Problem**: Need a typed client for an external API with connection reuse.
+
+**Approach** (typed client backed by IHttpClientFactory):
+
+```csharp
+// ✅ Good: Typed client uses IHttpClientFactory → connection pooling
+public interface IMyApiClient
+{
+    Task<Data> GetDataAsync(string id, CancellationToken cancellationToken = default);
+}
+
+public class MyApiClient : IMyApiClient
+{
+    private readonly HttpClient _httpClient;
+
+    public MyApiClient(HttpClient httpClient)
+    {
+        _httpClient = httpClient; // Injected by IHttpClientFactory
+    }
+
+    public async Task<Data> GetDataAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var response = await _httpClient.GetAsync($"/data/{id}", cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<Data>(cancellationToken: cancellationToken);
+    }
+}
+// Registration: services.AddHttpClient<IMyApiClient, MyApiClient>(c => c.BaseAddress = new Uri("https://api.example.com"));
+```
+
+**Results:** Typed client uses the same pooled `HttpClient`; connections are reused; no `new HttpClient()` per call.
+
+### Key takeaways
+
+- **Use for:** HTTP clients (IHttpClientFactory in ASP.NET Core), database connections (default ADO.NET/EF Core pooling), high-throughput network communication, any production service that creates multiple connections to the same target.
+- **Avoid:** Creating new `HttpClient` per request; not using IHttpClientFactory; misconfiguring pool size; not disposing connections; different connection strings for the same DB (multiple pools).
+- **Typical impact:** 10x–100x better performance and lower latency when connection setup dominates; fewer connections, less CPU, no socket exhaustion.
+- **Trade-off:** Pools need configuration (min/max, timeouts); can hold idle connections; pool is per connection string for DB.
+- **Common mistakes:** New HttpClient per request; not using IHttpClientFactory in ASP.NET Core; not disposing SqlConnection/response so connections are not returned to pool; different connection strings for same DB.
+- **Important:** Use IHttpClientFactory for HTTP; use one connection string per database and proper disposal so ADO.NET pool is used; tune pool size and timeouts from load and server capacity.
+
+---
+
+## Batch Network Requests to Reduce Round-Trips and Improve Performance
+
+Batching means sending multiple operations in one network request instead of one request per operation. Each request pays a round-trip (RTT) and per-request overhead. One batch request for N items instead of N separate requests can cut total latency and improve throughput by 5x–50x when RTT is significant. Use it when you have many related operations and the API supports batch or bulk. Trade-off: batching logic and possibly higher latency for the first item while the batch fills.
+
+### Key concepts
+
+- **Round-trip (RTT)**: Time for a message to go from client to server and the response to come back. Every separate request pays at least one RTT. Example: 50 ms RTT means each request adds at least 50 ms latency.
+- **Latency**: Time to complete an operation (e.g. request to response). Batching reduces total latency when you need many items by doing one round-trip instead of many.
+- **Throughput**: Operations (or items) per unit of time. Batching increases throughput by reducing round-trips and per-request overhead.
+- **Batching**: Sending multiple operations or keys in a single request (and receiving multiple results in one response) instead of one request per operation.
+- **Batch API**: API that accepts multiple items (e.g. list of IDs) and returns multiple results in one call. Not all APIs support this; when they do, batching is the main way to reduce round-trips.
+- **Parallel requests**: Sending many requests at the same time (e.g. 50 concurrent GETs). Reduces *elapsed* time but still does 50 round-trips and 50× overhead. True batching is one (or few) round-trips for many items.
+- **Request overhead**: Fixed cost per request (headers, parsing, routing). Batching amortizes this over many items.
+
+### How batching works
+
+**Without batching:** Request 1 → RTT → Response 1; Request 2 → RTT → Response 2; … Request N → RTT → Response N. Total time: N × RTT + N × (server time + overhead).
+
+**With batching:** Request [id=1..N] → RTT → Response [item1..itemN]. Total time: 1 × RTT + (server time for N items + one request overhead).
+
+**Key insight:** Parallel requests (`Task.WhenAll` of N GETs) reduce wall-clock time but still do N round-trips. True batching (one request with N IDs) does 1 round-trip—often much better for latency and server load. Batch requires API support; REST batch endpoints, GraphQL (multiple queries), gRPC batch, DB bulk ops.
+
+### Why one request per item is a problem
+
+- **RTT dominates**: 100 ms RTT, 100 items → 10 s serial latency vs ~100 ms with one batch.
+- **Per-request overhead**: Headers, parsing, routing paid N times.
+- **Throughput cap**: Max items/sec limited by round-trips/sec; one per item caps at ~(1/RTT) items/sec.
+- **Server load**: Many small requests create more connections and context switches; one batch often uses less resources per item.
+
+### Example scenarios
+
+#### Scenario 1: Fetch many items by ID (batch API)
+
+**Problem**: Need 100 items by ID; one GET per ID takes 100 × 50 ms = 5 s on a 50 ms RTT link.
+
+**Bad approach** (one request per item, serial):
+
+```csharp
+// ❌ Bad: One request per item
+var items = new List<Item>();
+foreach (var id in ids)
+{
+    var item = await GetItemAsync(id);
+    items.Add(item);
+}
+```
+
+**Good approach** (batch endpoint):
+
+```csharp
+// ✅ Good: One batch request
+var items = await GetItemsBatchAsync(ids); // POST /api/items/batch { "ids": [1,2,...] }
+```
+
+**Results:**
+- **Bad**: 100 round-trips, ~5 s latency (RTT-dominated).
+- **Good**: 1 round-trip, ~50 ms + server time; 5x–50x faster.
+
+---
+
+#### Scenario 2: No batch API — parallel requests
+
+**Problem**: API has no batch endpoint; you need 50 items with lower wall-clock time.
+
+**Bad approach** (serial):
+
+```csharp
+// ❌ Bad: Serial
+foreach (var id in ids)
+    items.Add(await GetItemAsync(id));
+```
+
+**Good approach** (parallel, same API):
+
+```csharp
+// ✅ Good: Parallel (still 50 round-trips, but concurrent)
+var tasks = ids.Select(id => GetItemAsync(id));
+var items = (await Task.WhenAll(tasks)).ToList();
+```
+
+**Results:**
+- **Bad**: 50 × RTT elapsed.
+- **Good**: ~1 × RTT elapsed. Did not reduce round-trips (no batch API), but reduced waiting time. Prefer adding a batch API for real gains.
+
+---
+
+#### Scenario 3: Client-side batch buffer (e.g. writes)
+
+**Problem**: Many small write requests; want to group them into fewer, larger requests.
+
+**Approach** (buffer and flush on size or time):
+
+```csharp
+// ✅ Good: Buffer and send in batches
+private readonly Channel<WriteOp> _buffer = Channel.CreateBounded<WriteOp>(1000);
+private const int BatchSize = 50;
+private const int FlushMs = 20;
+
+// Producer
+await _buffer.Writer.WriteAsync(new WriteOp { Key = k, Value = v });
+
+// Consumer: flush when BatchSize reached or FlushMs elapsed
+await foreach (var batch in _buffer.Reader.ReadAllAsync().Buffer(BatchSize).WithTimeout(FlushMs))
+{
+    await _api.WriteBatchAsync(batch);
+}
+```
+
+**Results:** Fewer round-trips and less overhead than one request per write; first item may wait up to FlushMs or until batch fills.
+
+### Key takeaways
+
+- **Use for:** Many related operations, APIs that support batch/bulk, high RTT (cross-region, mobile), throughput matters.
+- **Avoid:** Batching when API has no batch; batches too large (timeouts); ignoring first-item latency; confusing parallel with batch.
+- **Typical impact:** 5x–50x lower total latency and higher throughput when RTT dominates.
+- **Trade-off:** Requires batch API or client-side logic; first item may wait for batch fill; tune batch size (e.g. 50–200).
+- **Common mistakes:** Confusing parallel with batch; no batch size limit; ignoring first-item latency; assuming all APIs support batch; not handling partial failure.
+- **Important:** Prefer real batch APIs over parallel when available; cap batch size; bound wait time for first item; handle partial failures.
+
+---
+
+## Use Binary Protocols for High-Throughput and Low-Payload Scenarios
+
+Binary protocols (e.g. Protocol Buffers, MessagePack) encode data in compact binary form instead of text (JSON, XML). They typically reduce payload size by 50–80% and serialization/deserialization cost by 3–10x compared to JSON. Use them for internal services, high-throughput APIs, and when payload size or CPU cost of serialization matters. Trade-off: less human-readable, requires a schema or contract, and less universal tooling than JSON.
+
+### Key concepts
+
+- **Serialization**: Converting an in-memory object into a form that can be stored or sent (e.g. bytes or string). Example: `JsonSerializer.Serialize(obj)` → JSON string.
+- **Deserialization**: Turning stored or received data back into an in-memory object. Example: `JsonSerializer.Deserialize<MyType>(json)`.
+- **Schema**: Description of data structure (field names, types). JSON often has no formal schema; protobuf requires a `.proto` file so both sides know how to encode/decode.
+- **Text protocol**: Human-readable format (JSON, XML). Easy to inspect; larger size and higher CPU than compact binary.
+- **Binary protocol**: Compact binary format (bytes). Smaller payload and usually faster encode/decode; not human-readable; typically requires schema or contract. Examples: Protocol Buffers (protobuf), MessagePack.
+- **Protocol Buffers (protobuf)**: Binary format and schema language from Google. Define messages in `.proto`; compiler generates code. Very compact (field numbers instead of names), fast. gRPC uses protobuf by default.
+- **MessagePack**: Binary equivalent of JSON (maps, arrays, primitives). No separate schema file; structure in the stream. Smaller and usually faster than JSON.
+- **Payload size**: Size in bytes of data sent/received. Smaller payloads use less bandwidth and often take less time to transfer.
+- **Compression**: General-purpose algorithm (gzip, Brotli) that shrinks any byte stream. Reduces bandwidth but adds CPU for compress/decompress. Does not remove JSON serialize/parse cost.
+
+### How binary encoding works
+
+**Text (JSON):** Keys repeated every time; numbers as text; strings with quotes and escaping → many bytes. Serialize/deserialize = string handling, parsing, allocation.
+
+**Binary (e.g. protobuf):** Field identity by number (schema), not name → no key strings. Numbers as variable-length or fixed-size; strings as length-prefixed bytes. Encode/decode = mostly memory copy and simple arithmetic. Result: 50–80% fewer bytes; 3–10x faster than JSON for typical structs.
+
+### Binary vs compression
+
+Both reduce payload size, but they work differently:
+
+- **Binary protocol**: Encodes the *structure* of the data in a compact way (no key names, compact numbers, length-prefixed strings). Smaller payload and **less CPU** for encode/decode than JSON. No separate “compression” step; the format itself is compact.
+- **Compression** (gzip, Brotli): Shrinks *any* byte stream (JSON, binary, or other). Reduces size over the wire but **adds CPU** for compress/decompress on both sides. Does **not** remove the cost of JSON serialization and deserialization: you still serialize to JSON, then compress; on the receiver you decompress, then parse JSON.
+
+**When compression alone helps:** Bottleneck is **bandwidth** (e.g. slow or metered links) and you want to keep JSON for readability or tooling. Compressing JSON (e.g. `Content-Encoding: gzip`) can cut payload size 60–80%. You still pay full JSON serialize/parse cost; you only save network time and bandwidth.
+
+**When binary helps more:** Bottleneck is **CPU** or total latency. Binary avoids JSON parse/serialize entirely and is often smaller than JSON even before compression. For small, structured messages, binary (e.g. protobuf) is frequently smaller than *compressed* JSON because binary doesn’t repeat key names—compression can’t remove what isn’t there. So: binary → smaller payload and less CPU; compressed JSON → smaller payload but same JSON CPU cost.
+
+**When to use both:** You can compress binary payloads too (e.g. protobuf + gzip). Use when you need maximum size reduction (e.g. very slow links, huge batches). You pay: binary encode/decode + compress/decompress. Often still faster than JSON + compress because binary encode/decode is cheap.
+
+**Summary:** Compression reduces size over the wire for any format; binary reduces size *and* CPU by changing the format. Use compression when you want to keep JSON and only care about bandwidth; use binary when CPU or total latency matters; use both (binary + compression) when you need the smallest possible payload and can afford the extra CPU.
+
+### Why text (JSON) for everything can be a bottleneck
+
+- **Payload size**: Larger payloads → more bandwidth and transfer time.
+- **CPU cost**: Text serialize/deserialize = string handling, parsing; at high message rates serialization can dominate CPU.
+- **Memory**: Larger payloads and temporary strings → more allocation and GC pressure.
+- **Throughput limit**: Cost per message caps messages/sec; binary raises that cap (3–10x in many cases).
+
+### Example scenarios
+
+#### Scenario 1: High-throughput internal API (protobuf)
+
+**Problem**: Internal service processes millions of small requests per second; JSON serialization and payload size consume CPU and bandwidth.
+
+**Bad approach** (JSON for everything):
+
+```csharp
+// ❌ Bad: JSON for high-throughput internal API
+var json = JsonSerializer.Serialize(request);
+var content = new StringContent(json, Encoding.UTF8, "application/json");
+var response = await _httpClient.PostAsync("/process", content);
+var result = await JsonSerializer.Deserialize<Response>(await response.Content.ReadAsStringAsync());
+```
+
+**Good approach** (protobuf):
+
+```csharp
+// ✅ Good: Protobuf for internal API
+var bytes = request.ToByteArray();
+var content = new ByteArrayContent(bytes);
+content.Headers.ContentType = new MediaTypeHeaderValue("application/x-protobuf");
+var response = await _httpClient.PostAsync("/process", content);
+var responseBytes = await response.Content.ReadAsByteArrayAsync();
+var result = Response.Parser.ParseFrom(responseBytes);
+```
+
+**Results:**
+- **Bad**: Larger payloads, higher CPU for serialize/deserialize; throughput limited by JSON cost.
+- **Good**: 50–80% smaller payloads, 3–10x faster encode/decode; higher throughput and lower latency.
+
+---
+
+#### Scenario 2: Smaller payload without .proto (MessagePack)
+
+**Problem**: Want smaller and faster than JSON but don’t want .proto and code generation yet.
+
+**Approach** (MessagePack):
+
+```csharp
+// ✅ Good: MessagePack — binary, compact, no separate schema file
+var bytes = MessagePackSerializer.Serialize(new MyMessage { Id = 1, Name = "Test", Count = 42 });
+var content = new ByteArrayContent(bytes);
+content.Headers.ContentType = new MediaTypeHeaderValue("application/msgpack");
+// ... send ...
+var result = MessagePackSerializer.Deserialize<MyMessage>(responseBytes);
+```
+
+**Results:** Smaller payload than JSON, faster serialize/deserialize, same C# types; no .proto step. Good middle ground when you want binary benefits without protobuf tooling.
+
+---
+
+#### Scenario 3: gRPC (protobuf by default)
+
+**Problem**: Need RPC between services with low latency and high throughput.
+
+**Approach** (gRPC uses protobuf):
+
+```csharp
+// ✅ Good: gRPC = protobuf by default
+var reply = await _grpcClient.ProcessAsync(new Request { Id = 1, Name = "Test" });
+// Request and reply serialized with protobuf; one round-trip, compact, fast
+```
+
+**Results:** Binary encoding by default; small payloads and fast serialization; streaming and tooling built on top.
+
+### Key takeaways
+
+- **Use for:** Internal services, high throughput, latency-sensitive APIs, payload size matters (mobile, metered bandwidth), gRPC or similar.
+- **Avoid:** Binary for public APIs where JSON is expected; binary when message rate and payload are negligible (JSON simpler); skipping schema versioning.
+- **Typical impact:** 50–80% smaller payloads, 3–10x faster serialization/deserialization than JSON.
+- **Trade-off:** Not human-readable; requires schema (protobuf) or agreed structure (MessagePack); less universal tooling than JSON.
+- **Common mistakes:** Using binary for every API; skipping schema versioning; assuming binary fixes all performance issues; ignoring compatibility; over-optimizing when JSON is fast enough.
+- **Important:** Use JSON for public or developer-friendly APIs; use binary where size and CPU matter; version schemas and plan evolution; measure first.
+
+---

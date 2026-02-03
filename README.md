@@ -6889,7 +6889,7 @@ public async Task ProcessItemAsync(Item item, CancellationToken cancellationToke
 
 ---
 
-### Throttling and rate limiting
+### Throttling and rate limiting (OK)
 
 **Cómo funciona:**
 Throttling y rate limiting controlan la tasa de operaciones, previniendo sobrecarga y mejorando la estabilidad del sistema.
@@ -10604,7 +10604,7 @@ Puede mejorar el rendimiento de serialización en un 3-10x y reducir el tamaño 
 
 ---
 
-### Use connection pooling
+### Use connection pooling (OK)
 
 **Cómo funciona:**
 Connection pooling reutiliza conexiones de red en lugar de crear nuevas para cada request, reduciendo overhead significativamente.
@@ -10639,7 +10639,7 @@ var connectionString = "Server=...;Database=...;"; // Pooling automático
 
 ---
 
-### Keep-alive connections
+### Keep-alive connections (OK)
 
 **Cómo funciona:**
 Keep-alive mantiene conexiones abiertas entre requests, evitando el overhead de establecer nuevas conexiones.
@@ -10709,7 +10709,7 @@ var items = await api.GetItemsAsync(ids); // Un request para todos
 
 ---
 
-### Batch network requests
+### Batch network requests (OK)
 
 **Cómo funciona:**
 Agrupar múltiples requests en un solo batch reduce el número de round-trips y mejora el rendimiento.
@@ -10744,7 +10744,7 @@ var items = await api.GetItemsBatchAsync(ids); // Un request
 
 ---
 
-### Use binary protocols
+### Use binary protocols (OK)
 
 **Cómo funciona:**
 Protocolos binarios (protobuf, MessagePack) son más eficientes que texto (JSON, XML) en tamaño y velocidad de serialización.
