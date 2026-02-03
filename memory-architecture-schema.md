@@ -117,6 +117,14 @@
 - **CPU Caches** (L1 → L2 → L3) filter memory access
 - **Storage** is accessed via **Page Faults** when data not in RAM
 
+**Why this hierarchy exists (necessity and advantages):**
+- **Virtual addresses**: Programs need a continuous, isolated address space. Physical RAM is shared and fragmented; without virtual memory every process would see raw physical addresses and could crash others. Virtual space gives each process its own “view,” simplifies linking, and enables security (one process cannot read another’s memory by address).
+- **Page table**: The OS must map virtual pages to physical pages (or “not present”). This is the only way to implement virtual memory: the CPU’s MMU uses the page table on every access to resolve addresses and trigger page faults when a page is not in RAM.
+- **Physical RAM**: It is the only place the CPU can read/write at full speed (100–300 cycles). Disk is 100,000× slower; without RAM the CPU would stall on every access. RAM is the working set: everything actively used must be here.
+- **Cache lines (64 bytes)**: The memory bus and caches transfer data in fixed-size blocks. Fetching one byte would still require a full bus transaction; fetching 64 bytes amortizes that cost and exploits spatial locality (nearby data is often used together). So the “unit of transfer” is the cache line.
+- **CPU caches (L1/L2/L3)**: RAM latency (100–300 cycles) would stall the CPU on every load/store. Caches keep recently used data in SRAM (1–75 cycles). Without caches, CPU throughput would collapse; with them, repeated or local access is orders of magnitude faster.
+- **Storage (disk/SSD)**: RAM is volatile and expensive; storage is persistent and cheap. The hierarchy exists so you can have a large “virtual” memory (backed by disk) while only paying for a limited amount of fast RAM. Page faults move data between storage and RAM when needed.
+
 ---
 
 ## CPU Cache System (L1, L2, L3)
@@ -179,6 +187,14 @@
               └──────────────────┘
 ```
 
+**Why the cache hierarchy exists (necessity and advantages):**
+- **Necessity**: RAM is too slow for the CPU to wait on every access. A single core can issue a load every few cycles; if every load cost 100–300 cycles, most cycles would be wasted. Caches reduce average latency by keeping hot data in fast SRAM close to the core.
+- **L1 (per core)**: Smallest and fastest (1–3 cycles). It must be tiny so lookup and latency stay minimal. Split into L1i (instructions) and L1d (data) so instruction and data access don’t conflict. Essential for the hottest code and data.
+- **L2 (per core)**: Catches L1 misses without going to shared L3. Larger than L1 (256 KB–1 MB), so fewer misses escape to L3. Latency (10–20 cycles) is still much better than RAM. It reduces pressure on L3 and keeps core-local data fast.
+- **L3 (shared, LLC)**: Shared by all cores so that data used by one core can be reused by another without going to RAM. Size (8–64 MB) makes it the main filter before RAM. Without L3, every L2 miss would hit RAM and bandwidth/latency would dominate. L3 also helps with cache coherency (one copy of shared data).
+
+---
+
 ### Cache Line Structure
 
 **What is a Cache Line?**
@@ -204,6 +220,13 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Why cache lines are 64 bytes (necessity and advantages):**
+- **Necessity**: The memory bus and RAM are optimized for block transfers; requesting a single byte would still use the same bus transaction and similar latency. The hardware therefore transfers a fixed block (cache line); the CPU and caches are designed around this unit.
+- **Advantages**: (1) **Spatial locality**: Accessing one byte often leads to accessing nearby bytes; loading 64 bytes makes the next several accesses hits. (2) **Amortized cost**: One miss loads 64 bytes, so the cost per byte drops. (3) **Simpler hardware**: Aligned, fixed-size lines simplify tags, coherency (MESI), and bus protocol. (4) **Prefetching**: The CPU can prefetch adjacent lines when it detects sequential access.
+- **Why not larger?** Larger lines would load more unused data on a miss (wasting bandwidth and cache space) and increase false sharing between cores. 64 bytes is a compromise between locality and efficiency.
+
+---
+
 ### Cache Coherency (MESI Protocol)
 
 **Multi-core systems**: Multiple CPU cores can have copies of the same cache line. MESI protocol ensures consistency:
@@ -225,6 +248,11 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why cache coherency (MESI) is needed (necessity and advantages):**
+- **Necessity**: With multiple cores, the same memory address can be cached in several L1/L2 caches. Without a protocol, one core could write and others would keep reading stale data. MESI (and variants) ensure that all cores see a consistent view of memory without the programmer handling it manually.
+- **Advantages**: (1) **Correctness**: Reads after writes from another core see the latest value (either by invalidation and reload, or by serving from the owning cache). (2) **Performance**: Shared read-only data can stay in S (Shared) in many caches; only writes cause invalidation. (3) **Hardware-managed**: Software does not need to flush or sync caches for normal memory; the hardware keeps coherency on cache-line granularity.
+- **Cost**: Writes to shared lines cause broadcast invalidations and possible reloads on other cores (one source of false sharing and contention). That is why avoiding unnecessary sharing of writable data between cores improves performance.
 
 ---
 
@@ -263,6 +291,14 @@
 │  page tables.                                                │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why virtual address space is structured this way (necessity and advantages):**
+- **Necessity**: Each process needs a full, private address space so it can use addresses (e.g. 0x1000) without knowing where other processes or the kernel live. The split (user vs kernel, reserved region) is mandated by the CPU and OS so that invalid access (e.g. null, or kernel from user) can be trapped.
+- **User space**: Holds code, heap, stack, and mappings. Isolated per process so a bug or attack in one process cannot read/write another’s memory. The large range (~128 TB) allows flexible layout (ASLR, large heaps) without changing the programming model.
+- **Kernel space**: Kept in the high part of the address range and protected so user code cannot read or write it. The kernel uses the same virtual-memory machinery but with full access to physical memory and devices. The gap between user and kernel ranges is a guard region that makes invalid accesses trigger faults immediately.
+- **Advantages**: Isolation (security and stability), abstraction (programs don’t depend on physical layout), and the ability to overcommit (map more virtual memory than physical RAM and use disk as backup via page faults).
+
+---
 
 ### Page Table Structure
 
@@ -304,6 +340,14 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Why the page table exists (necessity and advantages):**
+- **Necessity**: The CPU generates virtual addresses; RAM and devices use physical addresses. Something must translate every virtual access to a physical one. The page table is that mapping: the OS fills it, the MMU uses it on each access. Without it, virtual memory cannot work.
+- **Present bit**: Indicates whether the page is in RAM (1) or not (0). If 0, the MMU raises a page fault so the OS can load the page from disk/swap, allocate a physical page, and update the PTE. This is how “more virtual than physical” memory and swapping work.
+- **Other flags (RW, US, D, A)**: Enforce permissions (read/write, user/supervisor), track modifications (dirty → must be written back on eviction), and help the OS make eviction decisions (accessed → recently used). They are needed for security, correctness, and efficient page replacement.
+- **Advantages**: One central structure controls mapping, protection, and paging for the whole process; the OS can change mappings (e.g. for growth, mmap, fork) by updating PTEs without moving data.
+
+---
+
 ### Page Structure
 
 **What is a Page?**
@@ -337,6 +381,13 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why pages are the unit of management (necessity and advantages):**
+- **Necessity**: The OS cannot track every byte; it would need billions of entries and the MMU would be huge and slow. A fixed page size (e.g. 4 KB) divides the address space into manageable blocks. The MMU only needs the page number to index the page table; the offset within the page is passed through unchanged.
+- **Advantages**: (1) **Bounded table size**: Fewer entries (e.g. 4 KB pages → 1 M entries per 4 GB). (2) **Efficient I/O**: Disk and RAM are accessed in blocks; a page fits that model (load/swap a full page). (3) **Sharing**: Two processes can map the same physical page (e.g. shared libs, mmap) by pointing different virtual pages at it. (4) **Alignment**: Page-aligned blocks simplify DMA and cache/TLB use.
+- **Why 4 KB**: Historical and practical trade-off: small enough to limit internal fragmentation, large enough to keep page table and TLB size reasonable. Some systems use 2 MB “huge pages” to reduce TLB misses for large, contiguous mappings.
+
+---
 
 ### Address Translation Process
 
@@ -382,6 +433,11 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why address translation works this way (necessity and advantages):**
+- **Necessity**: Every load/store uses a virtual address; the memory system must produce the correct physical address and enforce permissions. The MMU does this in hardware on every access: split address into page number + offset, look up PTE, check Present and flags, combine physical page + offset or raise a fault. Software (the OS) only sets up and updates the page table; it does not sit in the path of every access.
+- **Two outcomes**: Present=1 → translation succeeds and the access goes to RAM (or triggers a cache fill). Present=0 → the OS must resolve the fault (load from disk, allocate, map) and retry. This is the only way to implement demand paging and overcommit: the OS reacts to “first touch” and brings in (or reclaims) pages as needed.
+- **Advantages**: (1) **Transparent to the program**: Code uses virtual addresses only. (2) **Security**: Invalid or unauthorized access becomes a fault (e.g. segfault) instead of corrupting other processes. (3) **Flexibility**: The OS can move pages (e.g. for defragmentation or NUMA) by updating PTEs; it can swap, share, or map files without changing the program.
 
 ---
 
@@ -431,6 +487,12 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Why physical RAM is organized and shared this way (necessity and advantages):**
+- **Necessity**: The CPU can only execute code and access data that ultimately resides in physical RAM (or caches filled from RAM). RAM is the single shared resource: the kernel, all processes, and the file cache compete for it. The OS decides which virtual pages get which physical pages and tracks free/used frames.
+- **Kernel vs user regions**: The kernel needs dedicated physical pages for its code, data structures, and buffers so it can run regardless of which process is current. User process memory is allocated on demand (e.g. when the process touches virtual pages) and can be evicted (e.g. swapped) under memory pressure. Separating them avoids the kernel being evicted and simplifies protection.
+- **File cache**: Reading from disk fills kernel-owned RAM (file cache). Later reads can be served from RAM without going to disk. The file cache is shared: many processes can benefit from the same cached pages. Without it, repeated file access would hit disk every time.
+- **Advantages**: One pool of RAM serves execution, caching, and buffering; the OS balances these uses. Physical addresses are what the memory controller and DMA use, so the OS must manage them for correctness and performance (e.g. NUMA, device access).
+
 ---
 
 ## Storage (Disk/SSD)
@@ -467,6 +529,12 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why storage sits at the bottom of the hierarchy (necessity and advantages):**
+- **Necessity**: RAM is volatile and limited; storage (disk/SSD) is persistent and large. Programs and data must survive power loss and fit in terabytes. So the OS keeps a “backing store”: swap for anonymous memory and files for file-backed mappings. When RAM is full or a page is unused, the OS can evict it to storage and reload it on a page fault.
+- **Swap/page file**: Extends effective “RAM” by moving rarely used pages to disk. Without it, overcommit would be unsafe (a process could touch more than physical RAM and the OS would have nowhere to put pages). Swap adds latency (major page fault) but allows more concurrent processes and larger working sets than physical RAM alone.
+- **Files**: Provide persistent, named storage. The OS can map file regions into virtual address space (memory-mapped I/O) so that access triggers page faults and loads from disk when needed. Alternatively, explicit read/write copies data between kernel buffers and user space. Both paths use the same file cache in RAM when data is hot.
+- **Advantages**: Persistence (data survives reboot), capacity (much larger than RAM), and the ability to run many processes whose total virtual size exceeds physical RAM, at the cost of latency when faulting in from storage.
 
 ---
 
@@ -539,6 +607,13 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Why kernel and user space are separated (necessity and advantages):**
+- **Necessity**: The CPU has privilege levels (e.g. Ring 0 kernel, Ring 3 user). User code must not touch kernel memory or hardware directly; otherwise one buggy or malicious process could crash the OS or break security. So the kernel runs in a separate address range and mode, and user code reaches it only via system calls (controlled entry points).
+- **Advantages**: (1) **Stability**: A user process crash does not take down the kernel. (2) **Security**: User code cannot read/write kernel or other processes’ memory. (3) **Controlled I/O**: All device and file access goes through the kernel, which enforces permissions and coordinates shared resources. (4) **Abstraction**: User code sees a simple API (e.g. read/write); the kernel handles drivers, caching, and multiplexing.
+- **Cost**: Every system call is a mode switch (user → kernel → user), which costs cycles. Data often must be copied between user and kernel buffers (see below). Zero-copy and memory-mapped I/O reduce copies but add complexity.
+
+---
+
 ### User Buffer vs Kernel Buffer
 
 ```
@@ -593,6 +668,12 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why there are two buffers and a copy (necessity and advantages):**
+- **Necessity**: The kernel cannot give user code a pointer into kernel space (that would break isolation). So for traditional read/write, the kernel holds data in its own buffers (e.g. file cache, socket buffer) and must copy the requested bytes into the user’s buffer before returning from the system call. That copy is mandatory for this model.
+- **Kernel buffer**: Needed because (1) the kernel reads from disk in page-sized chunks and caches them, (2) it may need to hold data for multiple readers or until the device has finished I/O, and (3) user space is not trusted or stable (process can exit or change mappings). So the “authoritative” copy for I/O lives in kernel space first.
+- **User buffer**: The process provides a virtual address range (e.g. `byte[]`). The kernel copies into it so the process can read the data after the call. The copy is what makes the data visible in the process’s address space without exposing kernel memory.
+- **Advantages of the copy**: Simple model (read returns data “in my buffer”), safe, and works with any device. **Disadvantage**: Extra CPU and memory bandwidth; for large or frequent I/O, zero-copy (e.g. mmap, sendfile) avoids the kernel→user copy and improves performance.
 
 ---
 
@@ -679,6 +760,14 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why the access path is this sequence (necessity and advantages):**
+- **Necessity**: The CPU must resolve every load/store. It first checks caches (fast path); on a miss it needs a physical address (MMU + page table) and then either RAM or a page fault. This order minimizes latency for the common case (cache hit) and defers expensive steps (TLB/page table walk, RAM, disk) until needed.
+- **L1 → L2 → L3**: Each level is larger and slower. Checking in order (fastest first) keeps average latency low: most accesses hit in L1, so they never pay L2/L3/RAM cost. The hierarchy exists because a single huge cache would be slow and power-hungry; splitting into levels gives a good hit rate with acceptable area and latency.
+- **MMU after cache miss**: The cache is addressed by physical address (or virtual index + physical tag) so that aliasing and security are correct. So on a cache miss the CPU must translate virtual→physical (MMU, TLB, page table) before it can request the line from RAM or handle a page fault.
+- **Page fault path**: When the page is not in RAM, the OS must load it from storage, allocate a physical page, and update the PTE. The retry then succeeds. This is the only way to support demand paging, overcommit, and memory-mapped files; the “cost” (major fault) is the price of having more virtual than physical memory and of lazy loading.
+
+---
 
 ### File I/O Data Flow (Traditional)
 
@@ -862,6 +951,11 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Why memory-mapped I/O avoids the kernel→user copy (necessity and advantages):**
+- **Necessity**: For large files or random access, copying every byte through the kernel into a user buffer is expensive. An alternative is to map file pages into the process’s virtual address space. Then the program “accesses memory”; the MMU and page table point those addresses to file-backed pages. On first access, a page fault loads the page from disk into RAM (one copy: disk → RAM); there is no second copy into a separate user buffer.
+- **Advantages**: (1) **Zero-copy for reads**: Data is used directly from the page that the OS loaded; no memcpy from kernel to user. (2) **Lazy loading**: Only touched pages are read from disk; the OS uses the page fault handler to load them. (3) **Caching**: Once in RAM, pages stay in the file cache; subsequent access is cache/RAM only. (4) **Sharing**: Multiple processes can map the same file and share physical pages. (5) **Simpler code for random access**: Use pointers or offsets instead of seek/read loops.
+- **When to use**: Good for random access, large files, or when the working set fits in RAM after faulting. Less ideal for one-pass sequential read (traditional read may be simpler and similarly fast with a large buffer).
+
 ---
 
 ## Locality Principles
@@ -928,6 +1022,14 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why cache locality matters (necessity and advantages):**
+- **Necessity**: The CPU cache is limited and shared. If your access pattern jumps around (e.g. linked list, pointer chasing), almost every access can miss the cache and wait for L2/L3/RAM. The program then runs at memory speed instead of cache speed—often 10–100× slower. So “cache locality” is not optional; it determines whether your code is cache-bound or compute-bound.
+- **Good locality (e.g. sequential array)**: Each cache line brought in is used for many accesses (e.g. 16 ints per 64-byte line). Miss rate stays low; most cycles are spent computing, not waiting for memory. This is why array-based, sequential loops are fast and predictable.
+- **Poor locality (e.g. linked list)**: Each node may be in a different cache line; following the pointer often causes a miss. The CPU spends most of its time waiting for memory. Advantages of lists (dynamic insert/delete) come at the cost of worse locality; for hot loops, arrays or contiguous structures are usually better.
+- **Practical takeaway**: When performance matters, prefer contiguous or cache-line-friendly layouts (e.g. array of structs for per-entity fields you use together) and sequential or strided access so the hardware prefetcher and cache can help.
+
+---
 
 ### Spatial Locality
 
@@ -999,6 +1101,13 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Why spatial locality is exploited by the hardware (necessity and advantages):**
+- **Necessity**: Programs often touch nearby data (e.g. array elements, struct fields, the next instruction). If the CPU only fetched the exact byte requested, it would miss the next access and pay full latency again. So the hardware assumes “nearby will be used soon” and loads a full cache line; that assumption is spatial locality.
+- **Advantages**: (1) **One miss loads many useful bytes**: Amortizes the cost of the miss. (2) **Prefetching**: The CPU can prefetch the next cache line when it detects sequential access. (3) **Array-of-structs**: When you iterate over structs, each struct’s fields are adjacent; one line may hold several structs, so you get many hits per line. (4) **Struct of arrays**: If you only need one field, storing it in a separate array can be worse for spatial locality (each field access may touch a different line) but better for vectorization; the trade-off depends on access pattern.
+- **Why 64 bytes**: Small enough that you don’t waste too much bandwidth on unused bytes when access is random; large enough that sequential access gets a good run of hits. Larger lines would help pure sequential access but hurt random or strided access.
+
+---
+
 ### Temporal Locality
 
 ```
@@ -1030,6 +1139,11 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why temporal locality is important (necessity and advantages):**
+- **Necessity**: Caches are finite; they keep only a subset of recently used lines. If your program reuses the same data (or same lines) soon after first use, that data is still in the cache—a hit. If it never revisits, every access is effectively cold and the cache helps little. So temporal locality (reuse over time) is what makes the cache effective.
+- **Advantages**: (1) **Loop variables and accumulators**: Used every iteration; they stay in register or L1. (2) **Hot data structures**: Frequently accessed globals or heap objects remain cached. (3) **LRU eviction**: The cache keeps “recently used” lines; if your working set fits in the cache and is reused, you get high hit rate. (4) **Small working set**: If the set of addresses you touch in a loop fits in L1/L2, you get predictable, fast performance.
+- **When temporal locality is poor**: Large working sets that don’t fit in cache, or access patterns that don’t reuse data (e.g. one-pass over huge data). Then the cache is constantly evicting; you pay miss latency often. Reducing working set size or increasing reuse (e.g. blocking/tiling) improves temporal locality.
 
 ---
 
@@ -1099,6 +1213,12 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Why the first access is so expensive (necessity and advantages):**
+- **Necessity**: The mapped page is not in RAM until someone touches it (demand paging). The first access must trigger a page fault so the OS can load the file page from disk, allocate a physical page, and wire it into the page table. All of that (fault handling, disk I/O, TLB and cache fill) is paid once per page.
+- **Advantages of the design**: (1) **Lazy load**: Only used pages are read; the rest never touch disk. (2) **Fast subsequent access**: Once the page is in RAM and in the cache, later accesses are just normal memory loads (1–75 cycles). (3) **No extra copy**: Unlike read(), there is no kernel→user copy; you use the same page the OS loaded. (4) **Shared cache**: Other processes mapping the same file can hit the same physical page in the file cache.
+
+---
+
 ### Example 2: Traditional File Read with Buffer Copy
 
 ```
@@ -1152,6 +1272,11 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Why traditional read involves two copies and when it still makes sense (necessity and advantages):**
+- **Necessity**: The kernel never exposes its buffers to user space. So data must end up in a user buffer that the process owns; that implies a copy from the kernel’s file cache (or I/O buffer) into the user’s buffer. The first “copy” (disk → kernel buffer) is required for the kernel to cache and manage I/O; the second (kernel → user) is required for the safe, traditional read API.
+- **Advantages of traditional read**: (1) **Simple**: One call fills your buffer; no mapping or page faults to think about. (2) **Portable**: Works on any file, pipe, or device. (3) **Predictable**: You control buffer size and alignment. (4) **Good for sequential one-pass**: With a large buffer, one read per chunk can be efficient; the main cost may be disk I/O, not the copy.
+- **When mmap is better**: Random access, large files, or when the same region is read many times (no repeated copy). When a single read of a small chunk is enough, read() is fine and often simpler.
+
 ---
 
 ## Additional Concepts You May Have Missed
@@ -1193,6 +1318,13 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why the TLB exists (necessity and advantages):**
+- **Necessity**: The page table can be huge (e.g. multi-level, many entries). Walking it on every memory access would add many RAM reads (each taking 100+ cycles). The TLB is a small, fast cache of recent virtual→physical page translations so that the MMU can resolve most addresses in 1–3 cycles without touching the page table.
+- **Advantages**: (1) **Low latency**: A TLB hit makes translation almost free. (2) **Reduced memory traffic**: No page table walk for hot pages. (3) **Scalability**: Without a TLB, increasing address space or process count would make every access slower; the TLB keeps the common case fast. (4) **Per-core TLBs**: Each core has its own TLB, so no contention on translation.
+- **TLB miss cost**: On a miss, the MMU (or OS) walks the page table (multiple levels, multiple memory accesses), then installs the new mapping in the TLB. That can cost 100–300 cycles. So access patterns that reuse the same pages (good locality in the page space) get high TLB hit rate and better performance; huge or sparse mappings cause more TLB misses.
+
+---
 
 ### Memory Bus and Load/Store Units
 
@@ -1238,6 +1370,13 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why the memory bus and load/store units matter (necessity and advantages):**
+- **Necessity**: The CPU must get data from RAM (and send writes) through a finite bus. Load/store units generate requests; the memory controller schedules them and transfers whole cache lines. The bus width (e.g. 64-bit) and clock determine peak bandwidth; latency is dominated by the round trip to RAM and back. So the “path” from core to RAM is a bottleneck that caches are designed to avoid as much as possible.
+- **Advantages of cache-line transfers**: (1) **Efficiency**: One transaction brings 64 bytes; amortizes bus and controller overhead. (2) **Coherency**: MESI works on cache-line granularity; the bus carries line-sized messages. (3) **Predictability**: Aligned, sized transfers simplify controllers and DRAM access. (4) **Bandwidth**: Sequential access can approach peak bus bandwidth when the cache is not the limit.
+- **Implication for software**: Access patterns that use each cache line fully (e.g. sequential) get better bandwidth; random access causes many small effective transfers per line and may not saturate the bus but still pay latency per line.
+
+---
 
 ### Write-Back vs Write-Through Caches
 
@@ -1285,6 +1424,14 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Why write-back vs write-through (necessity and advantages):**
+- **Necessity**: On a write, the CPU must update the cache; the question is whether it also updates RAM immediately (write-through) or later when the line is evicted (write-back). Write-through simplifies coherency and ensures RAM is always up to date but doubles write traffic to RAM and is slow. Write-back reduces traffic and latency (writes complete at cache speed) but RAM is stale until the line is written back.
+- **Write-through**: Every write goes to cache and to RAM. Advantage: simple, RAM is current (e.g. for DMA or recovery). Disadvantage: every store pays RAM latency and uses bus bandwidth. Sometimes used for L1 or for specific regions (e.g. device memory).
+- **Write-back**: Writes update only the cache; the line is marked dirty. On eviction, the dirty line is written to RAM. Advantage: writes are fast and bus traffic is lower (multiple writes to the same line become one write-back). Disadvantage: RAM is stale; coherency and persistence require care (e.g. cache flush for mmap durability). Modern CPUs use write-back for L2/L3 and often L1.
+- **For memory-mapped files**: Writes may sit in dirty cache lines until eviction or an explicit flush. So “written” data might not be on disk until the OS flushes or the line is evicted; this is why msync/flush matters for durability.
+
+---
+
 ### Direct Memory Access (DMA)
 
 ```
@@ -1326,6 +1473,11 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why DMA exists (necessity and advantages):**
+- **Necessity**: If the CPU had to copy every byte from disk (or network) into RAM, it would spend all its time moving data and could not run other tasks. DMA engines are hardware that perform block transfers between device and RAM (or RAM and RAM) without the CPU touching every byte. The CPU only programs the transfer (address, size, direction) and is interrupted when done (or polls). So I/O can proceed in parallel with computation.
+- **Advantages**: (1) **CPU offload**: The CPU is free during the transfer. (2) **Throughput**: Dedicated hardware can sustain high bandwidth. (3) **Efficiency**: One setup, one completion; no per-byte involvement. (4) **Standard for devices**: Disk and network controllers use DMA; the OS and drivers rely on it.
+- **Relation to zero-copy**: DMA still moves data into kernel buffers (e.g. file cache). The “zero-copy” win is eliminating the *second* copy (kernel buffer → user buffer) by mapping or sending the kernel buffer directly (e.g. mmap, sendfile), not by removing DMA.
 
 ---
 
@@ -1371,6 +1523,9 @@
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Why the full chain is necessary (big picture):**
+- Each layer exists to solve a concrete problem: **virtual memory** for isolation and overcommit, **page table** for mapping and paging, **physical RAM** as the only fast storage the CPU can address, **caches** to hide RAM latency, **cache lines** as the unit of transfer and locality, **storage** for capacity and persistence, **kernel/user split** for security and stability, **TLB** to make translation fast, **write-back** to make writes fast, **DMA** to offload I/O. None of these is redundant: remove one and either correctness or performance breaks. Understanding why each piece is there helps you reason about performance (e.g. cache misses, page faults, copies) and choose the right abstraction (e.g. mmap vs read, contiguous vs pointer-based structures).
 
 ---
 
