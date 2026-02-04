@@ -224,6 +224,9 @@
 - **Necessity**: The memory bus and RAM are optimized for block transfers; requesting a single byte would still use the same bus transaction and similar latency. The hardware therefore transfers a fixed block (cache line); the CPU and caches are designed around this unit.
 - **Advantages**: (1) **Spatial locality**: Accessing one byte often leads to accessing nearby bytes; loading 64 bytes makes the next several accesses hits. (2) **Amortized cost**: One miss loads 64 bytes, so the cost per byte drops. (3) **Simpler hardware**: Aligned, fixed-size lines simplify tags, coherency (MESI), and bus protocol. (4) **Prefetching**: The CPU can prefetch adjacent lines when it detects sequential access.
 - **Why not larger?** Larger lines would load more unused data on a miss (wasting bandwidth and cache space) and increase false sharing between cores. 64 bytes is a compromise between locality and efficiency.
+- **False Sharing**: When two cores access different variables that happen to be in the same cache line, writes from one core invalidate the cache line in the other core, even though they're not accessing the same data. This causes unnecessary cache misses and performance degradation.
+
+**Example of False Sharing:**
 
 ---
 
