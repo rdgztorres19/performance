@@ -57,9 +57,9 @@ A common misconception is that increasing the number of threads automatically im
 
 Fragmented work often requires:
 
-- Re-checking conditions
-- Re-entering code paths
-- Re-establishing execution flow
+- **Re-checking conditions**: When a thread resumes after being interrupted, it often needs to verify that assumptions made before the interruption are still valid (e.g., checking if a shared variable hasn't changed, verifying that a resource is still available)
+- **Re-entering code paths**: The thread may need to restart portions of its execution from a safe checkpoint rather than continuing exactly where it left off, especially if the interruption occurred during a critical operation
+- **Re-establishing execution flow**: The thread must rebuild its execution context, including restoring local variables, rekindling CPU pipeline state, and reloading relevant data into CPU caches that may have been evicted during the context switch
 
 When execution switches to another thread, different data is accessed and the previous data becomes less immediately available. When the original thread resumes, accessing its data again takes longer than if it had continued running.
 

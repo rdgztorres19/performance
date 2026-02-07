@@ -119,9 +119,9 @@
 
 **Why this hierarchy exists (necessity and advantages):**
 - **Virtual addresses**: Programs need a continuous, isolated address space. Physical RAM is shared and fragmented; without virtual memory every process would see raw physical addresses and could crash others. Virtual space gives each process its own “view,” simplifies linking, and enables security (one process cannot read another’s memory by address).
-- **Page table**: The OS must map virtual pages to physical pages (or “not present”). This is the only way to implement virtual memory: the CPU’s MMU uses the page table on every access to resolve addresses and trigger page faults when a page is not in RAM.
-- **Physical RAM**: It is the only place the CPU can read/write at full speed (100–300 cycles). Disk is 100,000× slower; without RAM the CPU would stall on every access. RAM is the working set: everything actively used must be here.
-- **Cache lines (64 bytes)**: The memory bus and caches transfer data in fixed-size blocks. Fetching one byte would still require a full bus transaction; fetching 64 bytes amortizes that cost and exploits spatial locality (nearby data is often used together). So the “unit of transfer” is the cache line.
+- **Page table**: The OS must map virtual pages to physical pages (or “not present”). This is the only way to implement virtual memory: the |CPU’s MMU uses the page table on every access to resolve addresses and trigger page faults when a page is not in RAM|.
+- **Physical RAM**: It is the only place the CPU can read/write at full speed (100–300 cycles). Disk is 100,000× slower; |without |RAM the CPU would stall on every access|. RAM is the working set: everything actively used must be here.
+- **Cache lines (64 bytes)**: The memory bus and caches transfer data in fixed-size blocks. |Fetching one byte would still require a full bus transaction; fetching 64 bytes amortizes that cost and exploits spatial locality (nearby data is often used together)|. So the “unit of transfer” is the cache line.
 - **CPU caches (L1/L2/L3)**: RAM latency (100–300 cycles) would stall the CPU on every load/store. Caches keep recently used data in SRAM (1–75 cycles). Without caches, CPU throughput would collapse; with them, repeated or local access is orders of magnitude faster.
 - **Storage (disk/SSD)**: RAM is volatile and expensive; storage is persistent and cheap. The hierarchy exists so you can have a large “virtual” memory (backed by disk) while only paying for a limited amount of fast RAM. Page faults move data between storage and RAM when needed.
 
@@ -188,10 +188,10 @@
 ```
 
 **Why the cache hierarchy exists (necessity and advantages):**
-- **Necessity**: RAM is too slow for the CPU to wait on every access. A single core can issue a load every few cycles; if every load cost 100–300 cycles, most cycles would be wasted. Caches reduce average latency by keeping hot data in fast SRAM close to the core.
-- **L1 (per core)**: Smallest and fastest (1–3 cycles). It must be tiny so lookup and latency stay minimal. Split into L1i (instructions) and L1d (data) so instruction and data access don’t conflict. Essential for the hottest code and data.
+- **Necessity**: RAM is too slow for the CPU to wait on every access. A single core can issue a load every few cycles; |if every load cost 100–300 cycles, most cycles would be wasted. Caches reduce average latency by keeping hot data in fast SRAM close to the core|.
+- **L1 (per core)**: Smallest and fastest (1–3 cycles). |It must be tiny so lookup and latency stay minimal|. Split into L1i (instructions) and L1d (data) so instruction and data access don’t conflict. Essential for the hottest code and data.
 - **L2 (per core)**: Catches L1 misses without going to shared L3. Larger than L1 (256 KB–1 MB), so fewer misses escape to L3. Latency (10–20 cycles) is still much better than RAM. It reduces pressure on L3 and keeps core-local data fast.
-- **L3 (shared, LLC)**: Shared by all cores so that data used by one core can be reused by another without going to RAM. Size (8–64 MB) makes it the main filter before RAM. Without L3, every L2 miss would hit RAM and bandwidth/latency would dominate. L3 also helps with cache coherency (one copy of shared data).
+- **L3 (shared, LLC)**: |Shared by all cores so that data used by one core can be reused by another without going to RAM|. Size (8–64 MB) makes it the main filter before RAM. Without L3, every L2 miss would hit RAM and bandwidth/latency would dominate. L3 also helps with cache coherency (one copy of shared data).
 
 ---
 
@@ -199,8 +199,8 @@
 
 **What is a Cache Line?**
 - **Size**: 64 bytes (standard on modern CPUs)
-- **Unit of transfer**: When you access 1 byte, the entire 64-byte cache line is loaded
-- **Why**: Spatial locality - if you access one byte, nearby bytes are likely accessed soon
+- **Unit of transfer**: |When you access 1 byte, the entire 64-byte cache line is loaded|
+- **Why**: |Spatial locality - if you access one byte, nearby bytes are likely accessed soon|
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -223,8 +223,8 @@
 **Why cache lines are 64 bytes (necessity and advantages):**
 - **Necessity**: The memory bus and RAM are optimized for block transfers; requesting a single byte would still use the same bus transaction and similar latency. The hardware therefore transfers a fixed block (cache line); the CPU and caches are designed around this unit.
 - **Advantages**: (1) **Spatial locality**: Accessing one byte often leads to accessing nearby bytes; loading 64 bytes makes the next several accesses hits. (2) **Amortized cost**: One miss loads 64 bytes, so the cost per byte drops. (3) **Simpler hardware**: Aligned, fixed-size lines simplify tags, coherency (MESI), and bus protocol. (4) **Prefetching**: The CPU can prefetch adjacent lines when it detects sequential access.
-- **Why not larger?** Larger lines would load more unused data on a miss (wasting bandwidth and cache space) and increase false sharing between cores. 64 bytes is a compromise between locality and efficiency.
-- **False Sharing**: When two cores access different variables that happen to be in the same cache line, writes from one core invalidate the cache line in the other core, even though they're not accessing the same data. This causes unnecessary cache misses and performance degradation.
+- **Why not larger?** |Larger lines would load more unused data on a miss (wasting bandwidth and cache space) and increase false sharing between cores. 64 bytes is a compromise between locality and efficiency.|
+- **False Sharing**: |When two cores access different variables that happen to be in the same cache line, writes from one core invalidate the cache line in the other core|, even though they're not accessing the same data. This causes unnecessary cache misses and performance degradation.
 
 **Example of False Sharing:**
 
@@ -232,7 +232,7 @@
 
 ### Cache Coherency (MESI Protocol)
 
-**Multi-core systems**: Multiple CPU cores can have copies of the same cache line. MESI protocol ensures consistency:
+**Multi-core systems**: |Multiple CPU cores can have copies of the same cache line. MESI protocol ensures consistency|:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -253,9 +253,9 @@
 ```
 
 **Why cache coherency (MESI) is needed (necessity and advantages):**
-- **Necessity**: With multiple cores, the same memory address can be cached in several L1/L2 caches. Without a protocol, one core could write and others would keep reading stale data. MESI (and variants) ensure that all cores see a consistent view of memory without the programmer handling it manually.
+- **Necessity**: |With multiple cores, the same memory address can be cached in several L1/L2 caches. Without a protocol, one core could write and others would keep reading stale data. MESI (and variants) ensure that all cores see a consistent view of memory without the programmer handling it manually.|
 - **Advantages**: (1) **Correctness**: Reads after writes from another core see the latest value (either by invalidation and reload, or by serving from the owning cache). (2) **Performance**: Shared read-only data can stay in S (Shared) in many caches; only writes cause invalidation. (3) **Hardware-managed**: Software does not need to flush or sync caches for normal memory; the hardware keeps coherency on cache-line granularity.
-- **Cost**: Writes to shared lines cause broadcast invalidations and possible reloads on other cores (one source of false sharing and contention). That is why avoiding unnecessary sharing of writable data between cores improves performance.
+- **Cost**: |Writes to shared lines cause broadcast invalidations and possible reloads on other cores (one source of false sharing and contention). That is why avoiding unnecessary sharing of writable data between cores improves performance.|
 
 ---
 
