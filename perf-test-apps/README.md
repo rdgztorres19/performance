@@ -56,17 +56,31 @@ node 01-context-switching/correct.js
 | 22-file-locks | Exclusive vs shared | tiempo |
 | 23-thread-pools | new Thread vs pool | tiempo |
 | 24-memory-mapped-io | read vs mmap | tiempo (solo Python) |
+| 25-thread-affinity | sin pin vs sched_setaffinity | tiempo (solo Linux) |
+| 26-page-faults | random vs sequential | tiempo |
+| 27-zero-copy | copy vs memoryview/slice | tiempo |
+| 28-cache-friendly-layouts | AoS vs SoA | tiempo |
+| 29-memory-barriers | lock vs Atomics | tiempo |
+| 30-compression-tradeoff | zip vs sin comprimir | tiempo |
+| 31-filesystem-metadata | muchos archivos vs prefetch | tiempo |
+| 32-buffered-streams | unbuffered vs buffered | tiempo |
+| 33-bulk-io | read pequeño vs bulk | tiempo |
+| 34-thread-pool-sizing | 200 threads vs cores | tiempo |
+| 35-cancellation-tokens | sin cancel vs Event | tiempo |
+| 36-throttling-rate-limiting | burst vs rate limit | tiempo |
+| 37-connection-pooling | new socket vs reuse | requiere _server.py |
+| 38-batch-network | N round-trips vs 1 batch | requiere _batch_server.py |
+| 39-binary-protocols | JSON vs struct.pack | tiempo |
 
-## Tópicos no implementables como script
+## Tópicos NO implementables (o solo parcialmente)
 
-- **Prefer Fewer Fast Cores**: hardware
-- **Thread Affinity**: requiere privilegios / APIs específicas
-- **Stack Allocation**: no stackalloc en Python/Node
-- **Memory Barriers**: demasiado low-level
-- **Compression tradeoff**: depende del bottleneck I/O vs CPU
-- **Connection pooling**: requiere servidor real
-- **Batch network**: requiere API batch
-- **Binary protocols**: requiere deps (msgpack, protobuf)
+| Tema | Motivo |
+|------|--------|
+| **Prefer Fewer Fast Cores** | Decisión de hardware; no se controla desde código. |
+| **Stack Allocation** | No existe `stackalloc` en Python/Node; el runtime controla la pila. |
+| **Connection Pooling** | Implementado con servidor mock local; requiere servidor real para medir bien. |
+| **Batch Network** | Implementado con servidor batch mock; requiere API real con soporte batch. |
+| **Binary Protocols** | Demo con struct vs JSON; producción usaría msgpack/protobuf (deps). |
 
 ## Herramientas Linux
 
