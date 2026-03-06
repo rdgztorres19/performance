@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""
+INCORRECT: Tiny buffer - many syscalls.
+Resume: "Choose Correct I/O Chunk Sizes"
+"""
+import os
+import tempfile
+import time
+SIZE_MB = 20
+CHUNK = 64  # Way too small
+
+def main():
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.dat') as f:
+        f.write(os.urandom(SIZE_MB * 1024 * 1024))
+        path = f.name
+    try:
+        print("INCORRECT: 64-byte buffer")
+        start = time.perf_counter()
+        with open(path, 'rb') as f:
+            while f.read(CHUNK):
+                pass
+        print(f"Read {SIZE_MB}MB in {time.perf_counter()-start:.2f}s")
+    finally:
+        os.unlink(path)
+
+if __name__ == "__main__":
+    main()
