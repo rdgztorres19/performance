@@ -1,0 +1,19 @@
+# Python runner for the performance demos.
+# No external dependencies: every demo uses only the standard library.
+FROM python:3.12-slim
+
+# Unbuffered stdout so container logs appear in real time instead of at exit.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+# Copy the topic folders. Sources are read-only at runtime; scratch data goes to /data.
+COPY . /app
+
+# Scratch space for the file-I/O demos so they never write into the source tree.
+RUN mkdir -p /data
+ENV TMPDIR=/data
+
+# Overridden per service by the compose file.
+CMD ["python3", "--version"]

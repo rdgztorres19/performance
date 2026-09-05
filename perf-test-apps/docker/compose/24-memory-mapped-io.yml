@@ -1,0 +1,43 @@
+# 24-memory-mapped-io - read() vs memory-mapped I/O
+#
+# Generated file. Enable with ENABLE_24_MEMORY_MAPPED_IO=true in .env, then:
+#     ./run.sh up memory-mapped-io
+#
+# Services:
+#   24-memory-mapped-io-py-incorrect
+#   24-memory-mapped-io-py-correct
+
+services:
+  24-memory-mapped-io-py-incorrect:
+    profiles: ["ENABLE_24_MEMORY_MAPPED_IO_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 24-memory-mapped-io-py-incorrect
+    command: ["python3", "24-memory-mapped-io/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  24-memory-mapped-io-py-correct:
+    profiles: ["ENABLE_24_MEMORY_MAPPED_IO_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 24-memory-mapped-io-py-correct
+    command: ["python3", "24-memory-mapped-io/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

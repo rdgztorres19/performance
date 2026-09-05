@@ -1,0 +1,43 @@
+# 30-compression-tradeoff - Compressing always vs only when I/O-bound
+#
+# Generated file. Enable with ENABLE_30_COMPRESSION_TRADEOFF=true in .env, then:
+#     ./run.sh up compression-tradeoff
+#
+# Services:
+#   30-compression-tradeoff-py-incorrect
+#   30-compression-tradeoff-py-correct
+
+services:
+  30-compression-tradeoff-py-incorrect:
+    profiles: ["ENABLE_30_COMPRESSION_TRADEOFF_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 30-compression-tradeoff-py-incorrect
+    command: ["python3", "30-compression-tradeoff/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  30-compression-tradeoff-py-correct:
+    profiles: ["ENABLE_30_COMPRESSION_TRADEOFF_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 30-compression-tradeoff-py-correct
+    command: ["python3", "30-compression-tradeoff/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

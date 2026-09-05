@@ -1,0 +1,115 @@
+# 05-branch-misprediction - Unpredictable branches vs sorted data
+#
+# Generated file. Enable with ENABLE_05_BRANCH_MISPREDICTION=true in .env, then:
+#     ./run.sh up branch-misprediction
+#
+# Services:
+#   05-branch-misprediction-py-incorrect
+#   05-branch-misprediction-py-correct
+#   05-branch-misprediction-js-incorrect
+#   05-branch-misprediction-js-correct
+#   05-branch-misprediction-c-incorrect
+#   05-branch-misprediction-c-correct
+
+services:
+  05-branch-misprediction-py-incorrect:
+    profiles: ["ENABLE_05_BRANCH_MISPREDICTION_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 05-branch-misprediction-py-incorrect
+    command: ["python3", "05-branch-misprediction/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  05-branch-misprediction-py-correct:
+    profiles: ["ENABLE_05_BRANCH_MISPREDICTION_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 05-branch-misprediction-py-correct
+    command: ["python3", "05-branch-misprediction/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  05-branch-misprediction-js-incorrect:
+    profiles: ["ENABLE_05_BRANCH_MISPREDICTION_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 05-branch-misprediction-js-incorrect
+    command: ["node", "05-branch-misprediction/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  05-branch-misprediction-js-correct:
+    profiles: ["ENABLE_05_BRANCH_MISPREDICTION_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 05-branch-misprediction-js-correct
+    command: ["node", "05-branch-misprediction/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  05-branch-misprediction-c-incorrect:
+    profiles: ["ENABLE_05_BRANCH_MISPREDICTION_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 05-branch-misprediction-c-incorrect
+    command: ["/app/05-branch-misprediction/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  05-branch-misprediction-c-correct:
+    profiles: ["ENABLE_05_BRANCH_MISPREDICTION_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 05-branch-misprediction-c-correct
+    command: ["/app/05-branch-misprediction/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

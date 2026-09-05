@@ -1,0 +1,43 @@
+# 34-thread-pool-sizing - Wrong pool size vs sized to workload
+#
+# Generated file. Enable with ENABLE_34_THREAD_POOL_SIZING=true in .env, then:
+#     ./run.sh up thread-pool-sizing
+#
+# Services:
+#   34-thread-pool-sizing-py-incorrect
+#   34-thread-pool-sizing-py-correct
+
+services:
+  34-thread-pool-sizing-py-incorrect:
+    profiles: ["ENABLE_34_THREAD_POOL_SIZING_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 34-thread-pool-sizing-py-incorrect
+    command: ["python3", "34-thread-pool-sizing/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  34-thread-pool-sizing-py-correct:
+    profiles: ["ENABLE_34_THREAD_POOL_SIZING_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 34-thread-pool-sizing-py-correct
+    command: ["python3", "34-thread-pool-sizing/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

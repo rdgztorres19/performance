@@ -1,0 +1,79 @@
+# 08-closures-allocations - Closure capture vs explicit parameters
+#
+# Generated file. Enable with ENABLE_08_CLOSURES_ALLOCATIONS=true in .env, then:
+#     ./run.sh up closures-allocations
+#
+# Services:
+#   08-closures-allocations-py-incorrect
+#   08-closures-allocations-py-correct
+#   08-closures-allocations-js-incorrect
+#   08-closures-allocations-js-correct
+
+services:
+  08-closures-allocations-py-incorrect:
+    profiles: ["ENABLE_08_CLOSURES_ALLOCATIONS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 08-closures-allocations-py-incorrect
+    command: ["python3", "08-closures-allocations/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  08-closures-allocations-py-correct:
+    profiles: ["ENABLE_08_CLOSURES_ALLOCATIONS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 08-closures-allocations-py-correct
+    command: ["python3", "08-closures-allocations/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  08-closures-allocations-js-incorrect:
+    profiles: ["ENABLE_08_CLOSURES_ALLOCATIONS_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 08-closures-allocations-js-incorrect
+    command: ["node", "08-closures-allocations/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  08-closures-allocations-js-correct:
+    profiles: ["ENABLE_08_CLOSURES_ALLOCATIONS_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 08-closures-allocations-js-correct
+    command: ["node", "08-closures-allocations/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

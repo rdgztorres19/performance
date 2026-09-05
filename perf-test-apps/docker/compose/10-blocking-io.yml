@@ -1,0 +1,79 @@
+# 10-blocking-io - Blocking I/O vs async I/O
+#
+# Generated file. Enable with ENABLE_10_BLOCKING_IO=true in .env, then:
+#     ./run.sh up blocking-io
+#
+# Services:
+#   10-blocking-io-py-incorrect
+#   10-blocking-io-py-correct
+#   10-blocking-io-js-incorrect
+#   10-blocking-io-js-correct
+
+services:
+  10-blocking-io-py-incorrect:
+    profiles: ["ENABLE_10_BLOCKING_IO_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 10-blocking-io-py-incorrect
+    command: ["python3", "10-blocking-io/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  10-blocking-io-py-correct:
+    profiles: ["ENABLE_10_BLOCKING_IO_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 10-blocking-io-py-correct
+    command: ["python3", "10-blocking-io/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  10-blocking-io-js-incorrect:
+    profiles: ["ENABLE_10_BLOCKING_IO_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 10-blocking-io-js-incorrect
+    command: ["node", "10-blocking-io/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  10-blocking-io-js-correct:
+    profiles: ["ENABLE_10_BLOCKING_IO_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 10-blocking-io-js-correct
+    command: ["node", "10-blocking-io/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

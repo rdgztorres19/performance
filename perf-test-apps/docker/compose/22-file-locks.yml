@@ -1,0 +1,43 @@
+# 22-file-locks - Exclusive locks vs shared locks
+#
+# Generated file. Enable with ENABLE_22_FILE_LOCKS=true in .env, then:
+#     ./run.sh up file-locks
+#
+# Services:
+#   22-file-locks-py-incorrect
+#   22-file-locks-py-correct
+
+services:
+  22-file-locks-py-incorrect:
+    profiles: ["ENABLE_22_FILE_LOCKS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 22-file-locks-py-incorrect
+    command: ["python3", "22-file-locks/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  22-file-locks-py-correct:
+    profiles: ["ENABLE_22_FILE_LOCKS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 22-file-locks-py-correct
+    command: ["python3", "22-file-locks/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

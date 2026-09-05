@@ -3,6 +3,7 @@
 CORRECT: Sequential access - prefetcher helps.
 Resume: "Optimize Memory Access Patterns"
 """
+import os
 import signal
 import time
 N = 2_000_000

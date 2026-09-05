@@ -1,0 +1,79 @@
+# 23-thread-pools - New thread per task vs thread pool
+#
+# Generated file. Enable with ENABLE_23_THREAD_POOLS=true in .env, then:
+#     ./run.sh up thread-pools
+#
+# Services:
+#   23-thread-pools-py-incorrect
+#   23-thread-pools-py-correct
+#   23-thread-pools-js-incorrect
+#   23-thread-pools-js-correct
+
+services:
+  23-thread-pools-py-incorrect:
+    profiles: ["ENABLE_23_THREAD_POOLS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 23-thread-pools-py-incorrect
+    command: ["python3", "23-thread-pools/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  23-thread-pools-py-correct:
+    profiles: ["ENABLE_23_THREAD_POOLS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 23-thread-pools-py-correct
+    command: ["python3", "23-thread-pools/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  23-thread-pools-js-incorrect:
+    profiles: ["ENABLE_23_THREAD_POOLS_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 23-thread-pools-js-incorrect
+    command: ["node", "23-thread-pools/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  23-thread-pools-js-correct:
+    profiles: ["ENABLE_23_THREAD_POOLS_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 23-thread-pools-js-correct
+    command: ["node", "23-thread-pools/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

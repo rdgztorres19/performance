@@ -1,0 +1,43 @@
+# 16-write-batching - Flush per write vs write batching
+#
+# Generated file. Enable with ENABLE_16_WRITE_BATCHING=true in .env, then:
+#     ./run.sh up write-batching
+#
+# Services:
+#   16-write-batching-py-incorrect
+#   16-write-batching-py-correct
+
+services:
+  16-write-batching-py-incorrect:
+    profiles: ["ENABLE_16_WRITE_BATCHING_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 16-write-batching-py-incorrect
+    command: ["python3", "16-write-batching/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  16-write-batching-py-correct:
+    profiles: ["ENABLE_16_WRITE_BATCHING_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 16-write-batching-py-correct
+    command: ["python3", "16-write-batching/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

@@ -1,0 +1,43 @@
+# 19-preallocate-file - Growing a file vs preallocating
+#
+# Generated file. Enable with ENABLE_19_PREALLOCATE_FILE=true in .env, then:
+#     ./run.sh up preallocate-file
+#
+# Services:
+#   19-preallocate-file-py-incorrect
+#   19-preallocate-file-py-correct
+
+services:
+  19-preallocate-file-py-incorrect:
+    profiles: ["ENABLE_19_PREALLOCATE_FILE_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 19-preallocate-file-py-incorrect
+    command: ["python3", "19-preallocate-file/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  19-preallocate-file-py-correct:
+    profiles: ["ENABLE_19_PREALLOCATE_FILE_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 19-preallocate-file-py-correct
+    command: ["python3", "19-preallocate-file/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

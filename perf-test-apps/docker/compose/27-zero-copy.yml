@@ -1,0 +1,115 @@
+# 27-zero-copy - Copying buffers vs zero-copy
+#
+# Generated file. Enable with ENABLE_27_ZERO_COPY=true in .env, then:
+#     ./run.sh up zero-copy
+#
+# Services:
+#   27-zero-copy-py-incorrect
+#   27-zero-copy-py-correct
+#   27-zero-copy-js-incorrect
+#   27-zero-copy-js-correct
+#   27-zero-copy-c-incorrect
+#   27-zero-copy-c-correct
+
+services:
+  27-zero-copy-py-incorrect:
+    profiles: ["ENABLE_27_ZERO_COPY_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 27-zero-copy-py-incorrect
+    command: ["python3", "27-zero-copy/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  27-zero-copy-py-correct:
+    profiles: ["ENABLE_27_ZERO_COPY_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 27-zero-copy-py-correct
+    command: ["python3", "27-zero-copy/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  27-zero-copy-js-incorrect:
+    profiles: ["ENABLE_27_ZERO_COPY_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 27-zero-copy-js-incorrect
+    command: ["node", "27-zero-copy/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  27-zero-copy-js-correct:
+    profiles: ["ENABLE_27_ZERO_COPY_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 27-zero-copy-js-correct
+    command: ["node", "27-zero-copy/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  27-zero-copy-c-incorrect:
+    profiles: ["ENABLE_27_ZERO_COPY_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 27-zero-copy-c-incorrect
+    command: ["/app/27-zero-copy/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  27-zero-copy-c-correct:
+    profiles: ["ENABLE_27_ZERO_COPY_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 27-zero-copy-c-correct
+    command: ["/app/27-zero-copy/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

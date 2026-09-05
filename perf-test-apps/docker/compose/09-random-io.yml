@@ -1,0 +1,79 @@
+# 09-random-io - Random I/O vs sequential I/O
+#
+# Generated file. Enable with ENABLE_09_RANDOM_IO=true in .env, then:
+#     ./run.sh up random-io
+#
+# Services:
+#   09-random-io-py-incorrect
+#   09-random-io-py-correct
+#   09-random-io-js-incorrect
+#   09-random-io-js-correct
+
+services:
+  09-random-io-py-incorrect:
+    profiles: ["ENABLE_09_RANDOM_IO_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 09-random-io-py-incorrect
+    command: ["python3", "09-random-io/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  09-random-io-py-correct:
+    profiles: ["ENABLE_09_RANDOM_IO_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 09-random-io-py-correct
+    command: ["python3", "09-random-io/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  09-random-io-js-incorrect:
+    profiles: ["ENABLE_09_RANDOM_IO_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 09-random-io-js-incorrect
+    command: ["node", "09-random-io/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  09-random-io-js-correct:
+    profiles: ["ENABLE_09_RANDOM_IO_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 09-random-io-js-correct
+    command: ["node", "09-random-io/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

@@ -1,0 +1,43 @@
+# 17-append-only - Update in place vs append-only
+#
+# Generated file. Enable with ENABLE_17_APPEND_ONLY=true in .env, then:
+#     ./run.sh up append-only
+#
+# Services:
+#   17-append-only-py-incorrect
+#   17-append-only-py-correct
+
+services:
+  17-append-only-py-incorrect:
+    profiles: ["ENABLE_17_APPEND_ONLY_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 17-append-only-py-incorrect
+    command: ["python3", "17-append-only/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  17-append-only-py-correct:
+    profiles: ["ENABLE_17_APPEND_ONLY_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 17-append-only-py-correct
+    command: ["python3", "17-append-only/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

@@ -1,0 +1,43 @@
+# 32-buffered-streams - Unbuffered vs buffered streams
+#
+# Generated file. Enable with ENABLE_32_BUFFERED_STREAMS=true in .env, then:
+#     ./run.sh up buffered-streams
+#
+# Services:
+#   32-buffered-streams-py-incorrect
+#   32-buffered-streams-py-correct
+
+services:
+  32-buffered-streams-py-incorrect:
+    profiles: ["ENABLE_32_BUFFERED_STREAMS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 32-buffered-streams-py-incorrect
+    command: ["python3", "32-buffered-streams/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  32-buffered-streams-py-correct:
+    profiles: ["ENABLE_32_BUFFERED_STREAMS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 32-buffered-streams-py-correct
+    command: ["python3", "32-buffered-streams/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

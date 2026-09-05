@@ -1,0 +1,79 @@
+# 25-thread-affinity - Unpinned threads vs CPU affinity
+#
+# Generated file. Enable with ENABLE_25_THREAD_AFFINITY=true in .env, then:
+#     ./run.sh up thread-affinity
+#
+# Services:
+#   25-thread-affinity-py-incorrect
+#   25-thread-affinity-py-correct
+#   25-thread-affinity-c-incorrect
+#   25-thread-affinity-c-correct
+
+services:
+  25-thread-affinity-py-incorrect:
+    profiles: ["ENABLE_25_THREAD_AFFINITY_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 25-thread-affinity-py-incorrect
+    command: ["python3", "25-thread-affinity/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  25-thread-affinity-py-correct:
+    profiles: ["ENABLE_25_THREAD_AFFINITY_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 25-thread-affinity-py-correct
+    command: ["python3", "25-thread-affinity/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  25-thread-affinity-c-incorrect:
+    profiles: ["ENABLE_25_THREAD_AFFINITY_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 25-thread-affinity-c-incorrect
+    command: ["/app/25-thread-affinity/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  25-thread-affinity-c-correct:
+    profiles: ["ENABLE_25_THREAD_AFFINITY_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 25-thread-affinity-c-correct
+    command: ["/app/25-thread-affinity/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

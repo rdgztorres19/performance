@@ -4,10 +4,11 @@ CORRECT: Reuse connection.
 Resume: "Use Connection Pooling"
 Requires: run _server.py first.
 """
+import os
 import socket
 import time
-HOST = '127.0.0.1'
-PORT = 9999
+HOST = os.getenv('SERVER_HOST', '127.0.0.1')
+PORT = int(os.getenv('SERVER_PORT', '9999'))
 N = 500
 
 def main():

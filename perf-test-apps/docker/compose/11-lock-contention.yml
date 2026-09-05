@@ -1,0 +1,115 @@
+# 11-lock-contention - Lock contention vs atomics
+#
+# Generated file. Enable with ENABLE_11_LOCK_CONTENTION=true in .env, then:
+#     ./run.sh up lock-contention
+#
+# Services:
+#   11-lock-contention-py-incorrect
+#   11-lock-contention-py-correct
+#   11-lock-contention-js-incorrect
+#   11-lock-contention-js-correct
+#   11-lock-contention-c-incorrect
+#   11-lock-contention-c-correct
+
+services:
+  11-lock-contention-py-incorrect:
+    profiles: ["ENABLE_11_LOCK_CONTENTION_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 11-lock-contention-py-incorrect
+    command: ["python3", "11-lock-contention/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  11-lock-contention-py-correct:
+    profiles: ["ENABLE_11_LOCK_CONTENTION_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 11-lock-contention-py-correct
+    command: ["python3", "11-lock-contention/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  11-lock-contention-js-incorrect:
+    profiles: ["ENABLE_11_LOCK_CONTENTION_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 11-lock-contention-js-incorrect
+    command: ["node", "11-lock-contention/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  11-lock-contention-js-correct:
+    profiles: ["ENABLE_11_LOCK_CONTENTION_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 11-lock-contention-js-correct
+    command: ["node", "11-lock-contention/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  11-lock-contention-c-incorrect:
+    profiles: ["ENABLE_11_LOCK_CONTENTION_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 11-lock-contention-c-incorrect
+    command: ["/app/11-lock-contention/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  11-lock-contention-c-correct:
+    profiles: ["ENABLE_11_LOCK_CONTENTION_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 11-lock-contention-c-correct
+    command: ["/app/11-lock-contention/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

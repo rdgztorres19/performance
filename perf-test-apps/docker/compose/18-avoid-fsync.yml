@@ -1,0 +1,43 @@
+# 18-avoid-fsync - fsync per write vs batched fsync
+#
+# Generated file. Enable with ENABLE_18_AVOID_FSYNC=true in .env, then:
+#     ./run.sh up avoid-fsync
+#
+# Services:
+#   18-avoid-fsync-py-incorrect
+#   18-avoid-fsync-py-correct
+
+services:
+  18-avoid-fsync-py-incorrect:
+    profiles: ["ENABLE_18_AVOID_FSYNC_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 18-avoid-fsync-py-incorrect
+    command: ["python3", "18-avoid-fsync/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  18-avoid-fsync-py-correct:
+    profiles: ["ENABLE_18_AVOID_FSYNC_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 18-avoid-fsync-py-correct
+    command: ["python3", "18-avoid-fsync/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

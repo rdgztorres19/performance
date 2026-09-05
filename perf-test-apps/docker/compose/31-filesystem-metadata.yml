@@ -1,0 +1,43 @@
+# 31-filesystem-metadata - Metadata churn vs reusing handles
+#
+# Generated file. Enable with ENABLE_31_FILESYSTEM_METADATA=true in .env, then:
+#     ./run.sh up filesystem-metadata
+#
+# Services:
+#   31-filesystem-metadata-py-incorrect
+#   31-filesystem-metadata-py-correct
+
+services:
+  31-filesystem-metadata-py-incorrect:
+    profiles: ["ENABLE_31_FILESYSTEM_METADATA_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 31-filesystem-metadata-py-incorrect
+    command: ["python3", "31-filesystem-metadata/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  31-filesystem-metadata-py-correct:
+    profiles: ["ENABLE_31_FILESYSTEM_METADATA_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 31-filesystem-metadata-py-correct
+    command: ["python3", "31-filesystem-metadata/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

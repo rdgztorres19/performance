@@ -1,0 +1,73 @@
+# 37-connection-pooling - New connection per call vs pooling
+#
+# Generated file. Enable with ENABLE_37_CONNECTION_POOLING=true in .env, then:
+#     ./run.sh up connection-pooling
+#
+# Services:
+#   37-connection-pooling-server (helper, started automatically)
+#   37-connection-pooling-py-incorrect
+#   37-connection-pooling-py-correct
+
+services:
+  37-connection-pooling-server:
+    profiles: ["ENABLE_37_CONNECTION_POOLING_PY_INCORRECT", "ENABLE_37_CONNECTION_POOLING_PY_CORRECT"]
+    labels:
+      perf-demo.role: "helper"
+    image: perf-demo-python:local
+    container_name: 37-connection-pooling-server
+    command: ["python3", "37-connection-pooling/_server.py"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket,sys; s=socket.create_connection(('127.0.0.1',9101),1); s.close()"]
+      interval: 1s
+      timeout: 2s
+      retries: 15
+      start_period: 1s
+    environment:
+      PORT: "9101"
+      HOST: "0.0.0.0"
+    working_dir: /app
+    restart: "no"
+
+  37-connection-pooling-py-incorrect:
+    profiles: ["ENABLE_37_CONNECTION_POOLING_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 37-connection-pooling-py-incorrect
+    command: ["python3", "37-connection-pooling/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+      SERVER_HOST: "37-connection-pooling-server"
+      SERVER_PORT: "9101"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    depends_on:
+      37-connection-pooling-server:
+        condition: service_healthy
+    restart: "no"
+
+  37-connection-pooling-py-correct:
+    profiles: ["ENABLE_37_CONNECTION_POOLING_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 37-connection-pooling-py-correct
+    command: ["python3", "37-connection-pooling/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+      SERVER_HOST: "37-connection-pooling-server"
+      SERVER_PORT: "9101"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    depends_on:
+      37-connection-pooling-server:
+        condition: service_healthy
+    restart: "no"

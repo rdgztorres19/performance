@@ -1,0 +1,97 @@
+# 28-cache-friendly-layouts - Array of structs vs struct of arrays
+#
+# Generated file. Enable with ENABLE_28_CACHE_FRIENDLY_LAYOUTS=true in .env, then:
+#     ./run.sh up cache-friendly-layouts
+#
+# Services:
+#   28-cache-friendly-layouts-py-incorrect
+#   28-cache-friendly-layouts-py-correct
+#   28-cache-friendly-layouts-js-correct
+#   28-cache-friendly-layouts-c-incorrect
+#   28-cache-friendly-layouts-c-correct
+
+services:
+  28-cache-friendly-layouts-py-incorrect:
+    profiles: ["ENABLE_28_CACHE_FRIENDLY_LAYOUTS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 28-cache-friendly-layouts-py-incorrect
+    command: ["python3", "28-cache-friendly-layouts/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  28-cache-friendly-layouts-py-correct:
+    profiles: ["ENABLE_28_CACHE_FRIENDLY_LAYOUTS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 28-cache-friendly-layouts-py-correct
+    command: ["python3", "28-cache-friendly-layouts/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  28-cache-friendly-layouts-js-correct:
+    profiles: ["ENABLE_28_CACHE_FRIENDLY_LAYOUTS_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 28-cache-friendly-layouts-js-correct
+    command: ["node", "28-cache-friendly-layouts/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  28-cache-friendly-layouts-c-incorrect:
+    profiles: ["ENABLE_28_CACHE_FRIENDLY_LAYOUTS_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 28-cache-friendly-layouts-c-incorrect
+    command: ["/app/28-cache-friendly-layouts/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  28-cache-friendly-layouts-c-correct:
+    profiles: ["ENABLE_28_CACHE_FRIENDLY_LAYOUTS_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 28-cache-friendly-layouts-c-correct
+    command: ["/app/28-cache-friendly-layouts/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

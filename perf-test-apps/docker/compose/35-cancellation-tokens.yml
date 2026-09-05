@@ -1,0 +1,43 @@
+# 35-cancellation-tokens - No cancellation vs cooperative cancellation
+#
+# Generated file. Enable with ENABLE_35_CANCELLATION_TOKENS=true in .env, then:
+#     ./run.sh up cancellation-tokens
+#
+# Services:
+#   35-cancellation-tokens-py-incorrect
+#   35-cancellation-tokens-py-correct
+
+services:
+  35-cancellation-tokens-py-incorrect:
+    profiles: ["ENABLE_35_CANCELLATION_TOKENS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 35-cancellation-tokens-py-incorrect
+    command: ["python3", "35-cancellation-tokens/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  35-cancellation-tokens-py-correct:
+    profiles: ["ENABLE_35_CANCELLATION_TOKENS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 35-cancellation-tokens-py-correct
+    command: ["python3", "35-cancellation-tokens/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

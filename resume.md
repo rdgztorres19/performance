@@ -3272,7 +3272,7 @@ public class GoodReadOnly
 **Performance**: Enables efficient multi-process sharing, reducing memory usage by 50-90% when multiple processes access the same file. Simpler code and better performance.
 ---
 
-# Use Memory Barriers for Correct Lock-Free Programming
+## Use Memory Barriers for Correct Lock-Free Programming
 
 ## Executive Summary
 
@@ -10051,5 +10051,3491 @@ var reply = await _grpcClient.ProcessAsync(new Request { Id = 1, Name = "Test" }
 - **Trade-off:** Not human-readable; requires schema (protobuf) or agreed structure (MessagePack); less universal tooling than JSON.
 - **Common mistakes:** Using binary for every API; skipping schema versioning; assuming binary fixes all performance issues; ignoring compatibility; over-optimizing when JSON is fast enough.
 - **Important:** Use JSON for public or developer-friendly APIs; use binary where size and CPU matter; version schemas and plan evolution; measure first.
+
+---
+
+## Choose the Right GC Mode for Your Workload
+
+The .NET garbage collector runs in different modes, and the wrong mode can cost 30%–50% of throughput or add 100+ ms pauses to every request. Workstation GC uses a single heap and prioritizes short pauses. Server GC creates one heap and one dedicated GC thread per CPU core, collecting in parallel for much higher allocation throughput. Background GC lets generation 2 collections run concurrently with application threads instead of stopping the world. Choosing correctly is a configuration decision you own in the project file, and it usually costs nothing to change.
+
+### Key concepts
+
+- **Generation**: The GC groups objects by age. Gen0 holds new objects, gen1 holds survivors of one collection, gen2 holds long-lived objects. Collecting gen0 is cheap because it is small and most objects die young.
+- **Gen0 budget**: The amount of allocation allowed before a gen0 collection triggers. Server GC uses a much larger budget (several MB per heap) than Workstation GC, so collections are less frequent but each one does more work.
+- **Stop-the-world pause**: The moment when all application threads are suspended so the GC can safely walk object references. Pause length is what users feel as a latency spike.
+- **Workstation GC**: One heap, one GC thread. Collections happen on the thread that triggered the allocation. Lower memory usage, shorter individual pauses, lower total throughput.
+- **Server GC**: One heap and one GC thread per core. All GC threads collect in parallel. Much higher allocation throughput, higher memory usage, longer individual pauses.
+- **Background GC**: Gen2 collections run mostly concurrently with the application. Only short pauses at the start and end. Enabled by default in both modes.
+- **Latency mode**: A runtime hint (`GCSettings.LatencyMode`) telling the GC to favor low pause times over throughput for a period of time.
+- **Heap hard limit**: A ceiling on managed heap size. In containers the runtime reads the cgroup memory limit and defaults to 75% of it, which prevents the container from being killed by the OOM killer.
+
+### How it works
+
+**Workstation GC, step by step:**
+
+1. A thread allocates and exhausts the gen0 budget (a few hundred KB).
+2. That thread suspends all other threads.
+3. That single thread marks reachable objects, compacts gen0, and promotes survivors.
+4. Threads resume. Total pause: typically 0.1–1 ms for gen0.
+5. Because the budget is small, this repeats very frequently under heavy allocation.
+
+**Server GC, step by step:**
+
+1. A thread exhausts the gen0 budget on its own heap (several MB).
+2. All threads suspend.
+3. N GC threads (one per core) each collect their own heap in parallel, stealing work from each other for balance.
+4. Threads resume. Total pause: typically 1–10 ms for gen0, but it collected 10x–50x more memory in that time.
+5. Because each heap is larger and collection is parallel, far fewer collections happen per second.
+
+**Why Server GC wins on throughput:** With 16 cores, 16 GC threads work simultaneously. A collection that would take 16 units of work on one thread takes roughly 1 unit of wall-clock time. Combined with a larger budget, the GC runs perhaps 20x less often and finishes each run faster relative to the work done.
+
+**Why Workstation GC wins on memory and small services:** Each Server GC heap reserves its own segment. On a 32-core machine that can mean 32 segments and hundreds of MB of committed memory even for an idle service. A container with a 256 MB limit running 40 replicas pays that cost 40 times.
+
+### Why the wrong GC mode becomes a bottleneck
+
+- **Workstation GC on a high-throughput server**: A web API allocating 500 MB/s triggers gen0 collections thousands of times per second, all on one thread. Measured throughput loss versus Server GC is commonly 30%–50%.
+- **Server GC in a small container**: 32 heaps on a 4-core-limited container that the runtime still sees as 32 cores means 8x more GC threads than available CPU, causing oversubscription, context switching, and pauses far longer than expected.
+- **Non-concurrent gen2 in a latency-sensitive service**: A blocking gen2 collection on a 4 GB heap can pause every thread for 200–1000 ms. With background GC that becomes two pauses of a few milliseconds each.
+- **No heap hard limit in a container**: The GC sizes heaps against total machine memory, grows past the cgroup limit, and the container is killed with exit code 137 instead of collecting.
+- **Allocating to escape tuning**: Increasing heap size lowers collection frequency but raises pause duration because there is more memory to mark. Reducing allocation lowers both.
+
+### Example scenarios
+
+#### Scenario 1: High-throughput web API using the wrong mode
+
+**Problem**: An ASP.NET Core API on a 16-core VM serves 8,000 requests/sec. Each request allocates about 60 KB. CPU sits at 95% but throughput plateaus, and profiling shows 35% of CPU time inside the GC.
+
+```xml
+<!-- ❌ Bad: default for a console-hosted app is Workstation GC -->
+<PropertyGroup>
+  <TargetFramework>net8.0</TargetFramework>
+</PropertyGroup>
+```
+
+```xml
+<!-- ✅ Good: Server GC with background collection -->
+<PropertyGroup>
+  <TargetFramework>net8.0</TargetFramework>
+  <ServerGarbageCollection>true</ServerGarbageCollection>
+  <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+</PropertyGroup>
+```
+
+**Results:**
+- **Bad**: One GC thread collecting for 16 cores' worth of allocation. GC uses 35% of total CPU. Throughput 8,000 req/sec.
+- **Good**: 16 GC threads collect in parallel with a much larger gen0 budget. GC uses 8%–12% of CPU. Throughput about 12,000 req/sec.
+- **Improvement**: Roughly 50% more throughput with a two-line configuration change and no code change.
+
+#### Scenario 2: Containerized microservice killed by the OOM killer
+
+**Problem**: A service runs in Kubernetes with `limits.memory: 512Mi`. It restarts every few hours with exit code 137. Memory grows steadily even though the working set of live objects is only about 150 MB.
+
+```xml
+<!-- ❌ Bad: Server GC with no heap limit and no core awareness -->
+<PropertyGroup>
+  <ServerGarbageCollection>true</ServerGarbageCollection>
+</PropertyGroup>
+```
+
+```xml
+<!-- ✅ Good: bound the heap and the heap count to the container's real limits -->
+<PropertyGroup>
+  <ServerGarbageCollection>true</ServerGarbageCollection>
+  <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  <!-- Use at most 70% of the container memory limit for the managed heap -->
+  <ServerGarbageCollectionHeapHardLimitPercent>70</ServerGarbageCollectionHeapHardLimitPercent>
+</PropertyGroup>
+```
+
+```json
+// runtimeconfig.template.json - cap heap count to the CPU limit
+{
+  "configProperties": {
+    "System.GC.HeapCount": 2,
+    "System.GC.ConserveMemory": 5
+  }
+}
+```
+
+**Results:**
+- **Bad**: The GC sizes heaps against host memory, grows to 500+ MB of committed heap, and the kernel kills the container before a gen2 collection would have reclaimed anything.
+- **Good**: The GC knows its ceiling, collects more aggressively as it approaches 70% of 512 MB, and the container stays alive. Steady-state memory around 300 MB.
+- **Improvement**: Restarts eliminated. Slightly more GC CPU in exchange for stability.
+
+#### Scenario 3: A latency-critical section that must not pause
+
+**Problem**: An order-matching loop must complete a burst of work within a 5 ms deadline. Occasionally a gen2 collection lands mid-burst and blows the deadline.
+
+```csharp
+// ❌ Bad: hope the GC does not run during the critical burst
+public void ProcessBurst(Order[] orders)
+{
+    foreach (var order in orders)
+        Match(order);   // A gen2 collection here costs 200+ ms
+}
+
+// ✅ Good: request a no-GC region sized for the burst's allocation
+public void ProcessBurst(Order[] orders)
+{
+    bool noGc = false;
+    try
+    {
+        // Ask the GC to pre-allocate enough budget so no collection happens
+        noGc = GC.TryStartNoGCRegion(totalSize: 32 * 1024 * 1024);
+
+        foreach (var order in orders)
+            Match(order);
+    }
+    finally
+    {
+        if (noGc && GCSettings.LatencyMode == GCLatencyMode.NoGCRegion)
+            GC.EndNoGCRegion();   // Deferred collections run now
+    }
+}
+```
+
+**Results:**
+- **Bad**: P99.9 latency of the burst is 210 ms because of an occasional gen2 pause.
+- **Good**: No collection inside the region. P99.9 drops to about 6 ms. The deferred work happens after `EndNoGCRegion`, outside the deadline.
+- **Improvement**: Deterministic latency inside the critical window, at the cost of a memory spike and a larger collection afterward.
+
+### Key takeaways
+
+- **Use Server GC for:** Servers, APIs, worker services, anything multi-core and throughput-oriented. It is the default for ASP.NET Core projects and the right default for almost every backend.
+- **Use Workstation GC for:** Desktop apps, CLI tools, and small containers where memory footprint matters more than allocation throughput, or when running many replicas on few cores.
+- **Always set a heap hard limit in containers** so the GC collects before the OOM killer acts, and cap `HeapCount` to the container's CPU limit.
+- **Typical improvements:** 30%–50% throughput from Workstation to Server GC on a busy multi-core server. Gen2 pauses dropping from hundreds of milliseconds to single digits with background GC.
+- **Trade-off:** Server GC uses substantially more memory (one heap per core) and has longer individual pauses. `NoGCRegion` trades a memory spike for a pause-free window and fails if the requested budget cannot be reserved.
+- **Common mistakes:** Leaving Workstation GC on a busy server. Enabling Server GC in a tiny container without limiting heap count. Tuning GC settings instead of reducing allocation, which is almost always the larger win.
+- **Important:** GC configuration is a multiplier on top of allocation behavior, not a substitute for it. Reduce allocations first, then pick the mode.
+
+---
+
+## Avoid Boxing and Unboxing in Hot Paths
+
+Boxing wraps a value type in a heap-allocated object so it can be treated as a reference type. Every box is an allocation of at least 24 bytes on a 64-bit runtime, plus a copy of the value, plus eventual GC work to collect it. Unboxing is the reverse and includes a type check. In a loop running millions of times, boxing that is invisible in the source code can dominate both allocation rate and CPU. The fix is almost always generics, the right overload, or a struct-aware comparer, and it costs nothing at runtime.
+
+### Key concepts
+
+- **Value type**: A `struct`, `int`, `double`, `DateTime`, `Guid`, or `enum`. Lives inline: on the stack, in a register, or embedded in its containing object or array.
+- **Reference type**: A `class`. Lives on the heap. A variable holds a pointer to it.
+- **Boxing**: Allocating a heap object, copying the value into it, and returning a reference. The IL instruction is literally `box`.
+- **Unboxing**: Checking that a reference points to a box of the expected type, then copying the value back out. The IL instruction is `unbox.any`.
+- **Object header**: The 16 bytes of overhead every heap object carries on 64-bit (8-byte sync block index plus 8-byte method table pointer). A boxed `int` therefore costs 24 bytes to hold 4 bytes of data, a 6x overhead.
+- **Interface dispatch on a struct**: Calling an interface method through an interface-typed variable boxes the struct, because interfaces are reference-based. Calling through a generic constrained to the interface does not.
+- **Constrained generic**: `where T : IEquatable<T>` lets the JIT specialize the code for each struct type and call the method directly without boxing.
+
+### How it works
+
+**What the runtime does on a box:**
+
+1. Allocate 24 bytes (or more for larger structs) in gen0.
+2. Write the method table pointer for the boxed type into the header.
+3. Copy the value bytes into the payload.
+4. Return the pointer.
+5. Later, the GC must mark and sweep that object.
+
+Steps 1 and 5 are the expensive ones. A box costs roughly 10–20 ns to create plus a proportional share of the GC work it later causes. One million boxes per second is roughly 24 MB/s of pure garbage.
+
+**Where boxing hides in ordinary code:**
+
+- Passing a struct to a parameter typed `object`, including the `params object[]` of `string.Format` and older logging APIs.
+- Storing structs in a non-generic collection such as `ArrayList` or `Hashtable`.
+- Calling a method through an interface variable when the underlying value is a struct.
+- Calling `Equals(object)` or `GetHashCode` on a struct that has not overridden them, or using the default comparer for a struct that does not implement `IEquatable<T>`.
+- Using an `enum` as a dictionary key without a comparer, because the default comparer historically boxed to compare.
+- Calling `ToString()` on an enum, which does reflection-based name lookup in addition to allocating.
+- Assigning a struct to a `dynamic` or to `IComparable`.
+
+### Why boxing becomes a bottleneck
+
+- **Allocation rate**: 5 million boxes/second at 24 bytes each is 120 MB/s of garbage, enough to trigger gen0 collections continuously and consume a measurable share of CPU in the GC.
+- **Indirection and cache misses**: A `List<object>` of boxed ints is an array of pointers to 5 million scattered heap objects. Summing it touches a new cache line for nearly every element, versus one cache line per 16 elements for `int[]`.
+- **Type checks**: Every unbox performs a runtime type comparison. In a tight loop that is a branch the CPU must resolve on every iteration.
+- **Copy cost for large structs**: Boxing a 64-byte struct copies 64 bytes into the heap and copies them back on unbox. Doing that per element in a loop is pure memory bandwidth waste.
+- **Hidden in the framework**: The most damaging boxing usually appears in code the developer did not write, such as a comparer or a formatting call, so it is invisible without an allocation profiler.
+
+### Example scenarios
+
+#### Scenario 1: Enum keys in a dictionary
+
+**Problem**: A router looks up a handler by an enum key, millions of times per second. An allocation profile shows tens of millions of boxed enum instances.
+
+```csharp
+public enum MessageKind { Order, Trade, Quote, Heartbeat }
+
+// ❌ Bad: default comparer for an enum key can box on every lookup
+private readonly Dictionary<MessageKind, IHandler> _handlers = new();
+
+public IHandler Resolve(MessageKind kind) => _handlers[kind];
+// Each lookup may box `kind` to call Equals(object) and GetHashCode()
+```
+
+```csharp
+// ✅ Good option A: supply a struct comparer so no boxing occurs
+private readonly Dictionary<MessageKind, IHandler> _handlers =
+    new(EqualityComparer<MessageKind>.Default);   // Modern runtimes specialize this
+
+// ✅ Good option B: for a small dense enum, index an array directly
+private readonly IHandler[] _handlersByKind = new IHandler[4];
+
+public IHandler Resolve(MessageKind kind) => _handlersByKind[(int)kind];
+// Zero allocation, zero hashing, one bounds check and one array read
+```
+
+**Results:**
+- **Bad**: Two boxes per lookup in the worst case. At 3 million lookups/sec that is about 144 MB/s of garbage plus hashing cost.
+- **Good (array)**: No allocation, no hash computation. Lookup drops from roughly 20 ns to about 1 ns.
+- **Improvement**: Allocation eliminated entirely and lookups roughly 15x faster for the dense-enum case.
+
+#### Scenario 2: Logging and string formatting in a request path
+
+**Problem**: A request handler logs a few structured values per request. Allocation profiling shows `object[]` arrays and boxed `int`, `long`, and `DateTime` values as a top allocator, even though the log level is set to Warning and the messages are never written.
+
+```csharp
+// ❌ Bad: arguments are boxed and the array is allocated before the level is checked
+_logger.LogDebug("Processed order {OrderId} in {Elapsed}ms for customer {CustomerId}",
+                 orderId, elapsedMs, customerId);
+// Allocates: object[3] + box(long) + box(double) + box(int) = 4 allocations per call,
+// even when Debug logging is disabled and nothing is ever emitted.
+```
+
+```csharp
+// ✅ Good: source-generated logging is strongly typed and allocation-free when disabled
+public static partial class Log
+{
+    [LoggerMessage(
+        EventId = 1001,
+        Level = LogLevel.Debug,
+        Message = "Processed order {OrderId} in {Elapsed}ms for customer {CustomerId}")]
+    public static partial void OrderProcessed(
+        ILogger logger, long orderId, double elapsed, int customerId);
+}
+
+// Call site: no object[], no boxing, and the generated code checks IsEnabled first
+Log.OrderProcessed(_logger, orderId, elapsedMs, customerId);
+```
+
+**Results:**
+- **Bad**: 4 allocations per log call. At 10,000 req/sec with 3 disabled debug logs each, that is 120,000 allocations/sec producing nothing.
+- **Good**: Zero allocations when the level is disabled, because the generated method checks `IsEnabled` before touching any argument.
+- **Improvement**: Roughly 3 MB/s of garbage removed from the request path, and the calls become nearly free when disabled.
+
+#### Scenario 3: Sorting and comparing structs
+
+**Problem**: Sorting an array of a custom struct is far slower than expected and allocates heavily.
+
+```csharp
+// ❌ Bad: no IEquatable/IComparable, so the runtime falls back to boxing comparisons
+public struct Point
+{
+    public int X;
+    public int Y;
+}
+
+var points = new Point[1_000_000];
+Array.Sort(points, (a, b) => a.X.CompareTo(b.X));  // Delegate call per comparison
+```
+
+```csharp
+// ✅ Good: implement the generic interfaces so the JIT specializes and never boxes
+public readonly struct Point : IComparable<Point>, IEquatable<Point>
+{
+    public readonly int X;
+    public readonly int Y;
+
+    public Point(int x, int y) { X = x; Y = y; }
+
+    public int CompareTo(Point other) => X.CompareTo(other.X);
+    public bool Equals(Point other) => X == other.X && Y == other.Y;
+    public override bool Equals(object? obj) => obj is Point p && Equals(p);
+    public override int GetHashCode() => HashCode.Combine(X, Y);
+}
+
+var points = new Point[1_000_000];
+Array.Sort(points);   // Uses IComparable<Point> directly, no boxing, inlinable
+```
+
+**Results:**
+- **Bad**: Roughly 20 million comparisons for a million elements, each going through a delegate and potentially boxing.
+- **Good**: The JIT generates a specialized sort for `Point` and can inline `CompareTo`. Sort time drops by 40%–60% and allocation drops to zero.
+- **Improvement**: Substantially faster sorting with no garbage, from adding two interfaces.
+
+### Key takeaways
+
+- **Use for:** Any hot loop touching structs, dictionary keys, comparers, logging, and formatting. Anywhere an allocation profiler shows `System.Int32`, `System.Enum`, or a custom struct on the heap.
+- **Avoid when:** Cold paths and startup code. One box in configuration parsing is irrelevant.
+- **Rules:** Always implement `IEquatable<T>` and `GetHashCode` on structs used as keys or compared in bulk. Prefer generics over `object` parameters. Prefer generic collections over `ArrayList`/`Hashtable`. Prefer source-generated logging over `params object[]` APIs.
+- **Typical improvements:** Removing boxing from a hot loop commonly cuts allocation by 50%–90% in that path and speeds it up 20%–60% by eliminating indirection and GC pressure.
+- **Trade-off:** Almost none. Generic and constrained code is as readable as the boxing version, sometimes more so. The only cost is writing the interface implementations.
+- **Common mistakes:** Assuming a struct in a `List<T>` is safe (it is, but a `List<object>` is not). Not realizing interface calls on structs box. Leaving disabled log calls in hot paths because "they do nothing". Forgetting that `enum.ToString()` allocates and uses reflection.
+- **Important:** Boxing is invisible in C# source. Find it with an allocation profiler or by reading the IL, not by eye.
+
+---
+
+## Avoid LINQ in Hot Paths
+
+LINQ is a chain of iterator objects and delegates. Every query allocates enumerators, delegate instances, and closure display classes, and every element passes through a virtual `MoveNext` call for each operator in the chain. In a hot loop this can be 3x–10x slower than the equivalent `for` loop and allocate megabytes per second where the loop allocates nothing. LINQ is excellent for readability in configuration, startup, and request-scoped code that runs once. It is the wrong tool inside a loop that runs millions of times.
+
+### Key concepts
+
+- **Deferred execution**: `Where`, `Select`, and `OrderBy` do not run when called. They build an object graph. The work happens when something enumerates the result, which is why a query can be accidentally executed several times.
+- **Iterator object**: Each LINQ operator allocates a state machine object implementing `IEnumerable<T>` and `IEnumerator<T>`. A three-operator chain allocates at least three of them per query.
+- **Delegate allocation**: A lambda that captures nothing is cached by the compiler. A lambda that captures a local variable allocates a display class plus a delegate every time the enclosing method runs.
+- **Virtual dispatch per element**: Enumerating through `IEnumerable<T>` calls `MoveNext` and `Current` as interface calls, which cannot be inlined and prevent bounds-check elimination.
+- **Multiple enumeration**: Calling `Count()` and then `foreach` on the same deferred query runs the whole pipeline twice, doubling the work and any I/O behind it.
+- **Devirtualization**: When you `foreach` over a `List<T>` directly, the compiler uses the struct enumerator and the JIT can inline it. Passing that same list as `IEnumerable<T>` boxes the struct enumerator and loses the optimization.
+
+### How it works
+
+**What `items.Where(x => x.Value > threshold).Select(x => x.Id).ToList()` actually does:**
+
+1. Allocates a display class holding `threshold`.
+2. Allocates a `Func<Item,bool>` delegate pointing at the display class method.
+3. Allocates a `WhereListIterator<Item>`.
+4. Allocates a `Func<Item,int>` delegate for the projection.
+5. Allocates a `WhereSelectListIterator<Item,int>`.
+6. Allocates a `List<int>` that grows by doubling, copying on each resize.
+7. For each element: one interface `MoveNext`, one delegate invoke for the predicate, one delegate invoke for the projection, one bounds-checked list add.
+
+That is 6 allocations of fixed overhead plus 3 non-inlinable calls per element.
+
+**What the equivalent loop does:**
+
+1. Allocates one `List<int>` with a known capacity.
+2. For each element: one direct array read, one inlined comparison, one add.
+
+No delegates, no iterators, no interface calls. The JIT can keep `threshold` in a register and eliminate bounds checks.
+
+### Why LINQ in hot paths becomes a bottleneck
+
+- **Per-element call overhead**: Three non-inlinable calls per element versus zero. Over 10 million elements that is 30 million calls the CPU cannot optimize away.
+- **Allocation per invocation**: A query inside a method called 100,000 times per second allocates 600,000 objects per second even though each individual query is small.
+- **Cache behavior**: Iterator objects are scattered on the heap. The loop walks a contiguous array. The difference shows up as cache misses proportional to the number of operators.
+- **Accidental double work**: `if (query.Any()) { foreach (var x in query) ... }` enumerates twice. Behind a database or a file that means two round-trips.
+- **Hidden O(n²)**: `list.Where(x => other.Contains(x.Id))` where `other` is a `List<T>` is a linear scan per element. With 10,000 and 10,000 that is 100 million comparisons.
+
+### Example scenarios
+
+#### Scenario 1: Filtering inside a per-request hot path
+
+**Problem**: An endpoint filters an in-memory catalog of 50,000 items on every request. At 2,000 requests/sec the allocation profiler shows LINQ iterators as the top allocator.
+
+```csharp
+// ❌ Bad: allocates display class, 2 delegates, 2 iterators, and a growing list per call
+public List<int> GetMatchingIds(Item[] items, int threshold, string category)
+{
+    return items
+        .Where(x => x.Value > threshold)
+        .Where(x => x.Category == category)
+        .Select(x => x.Id)
+        .ToList();
+}
+```
+
+```csharp
+// ✅ Good: one allocation, no delegates, no iterators, single pass
+public List<int> GetMatchingIds(Item[] items, int threshold, string category)
+{
+    var result = new List<int>(capacity: 64);   // Pre-sized to a typical result
+
+    for (int i = 0; i < items.Length; i++)
+    {
+        ref readonly var item = ref items[i];   // No copy of the struct
+
+        if (item.Value > threshold && item.Category == category)
+            result.Add(item.Id);
+    }
+
+    return result;
+}
+```
+
+**Results:**
+- **Bad**: 6+ allocations per call plus 3 delegate invocations per element. At 2,000 req/sec over 50,000 items that is 300 million delegate calls/sec.
+- **Good**: 1 allocation per call, everything inlined, single pass with short-circuit evaluation.
+- **Improvement**: Roughly 4x faster on this path and about 90% less allocation.
+
+#### Scenario 2: Accidental multiple enumeration
+
+**Problem**: A report method appears to hit the database once but the query log shows three identical queries per call.
+
+```csharp
+// ❌ Bad: `orders` is deferred; each use re-executes the whole query
+public Report Build(IQueryable<Order> orders)
+{
+    if (!orders.Any())                      // Query 1
+        return Report.Empty;
+
+    var total = orders.Sum(o => o.Amount);  // Query 2
+    var list  = orders.ToList();            // Query 3
+
+    return new Report(total, list);
+}
+```
+
+```csharp
+// ✅ Good: materialize once, then work in memory
+public Report Build(IQueryable<Order> orders)
+{
+    var list = orders.ToList();             // Query 1, the only one
+
+    if (list.Count == 0)
+        return Report.Empty;
+
+    decimal total = 0;
+    foreach (var o in list)                 // No delegate, no second pass over the DB
+        total += o.Amount;
+
+    return new Report(total, list);
+}
+```
+
+**Results:**
+- **Bad**: Three round-trips and three full scans for one logical operation.
+- **Good**: One round-trip. Latency drops from about 45 ms to 15 ms on a 15 ms query.
+- **Improvement**: 3x lower latency and one third of the database load, from moving one line.
+
+#### Scenario 3: Quadratic lookup hidden behind Contains
+
+**Problem**: Reconciling two collections of 20,000 items each takes 4 seconds. The code looks linear.
+
+```csharp
+// ❌ Bad: Contains on a List is O(n), so this is O(n*m) = 400 million comparisons
+var missing = local.Where(x => !remote.Contains(x.Id)).ToList();
+```
+
+```csharp
+// ✅ Good: build a hash set once, then each lookup is O(1)
+var remoteIds = new HashSet<long>(remote.Count);
+foreach (var r in remote)
+    remoteIds.Add(r.Id);
+
+var missing = new List<Item>();
+foreach (var x in local)
+{
+    if (!remoteIds.Contains(x.Id))
+        missing.Add(x);
+}
+```
+
+**Results:**
+- **Bad**: 400 million comparisons, about 4,000 ms.
+- **Good**: 20,000 inserts plus 20,000 O(1) lookups, about 3 ms.
+- **Improvement**: Over 1,000x faster. The algorithmic change matters far more than the LINQ overhead here.
+
+### Key takeaways
+
+- **Use for:** Hot loops, per-element code running millions of times per second, code inside a request path that iterates large collections, anything an allocation profiler flags.
+- **Avoid optimizing:** Startup code, configuration, one-time setup, and any query over a handful of items. LINQ's readability is worth more there than nanoseconds.
+- **Rules:** Materialize deferred queries once with `ToList`/`ToArray` before using them more than once. Use `Count` (the property) on a list, not `Count()`. Use `HashSet`/`Dictionary` for membership tests. Iterate concrete types (`List<T>`, `T[]`, `Span<T>`) rather than `IEnumerable<T>` in hot code.
+- **Typical improvements:** 3x–10x faster and 80%–95% less allocation when replacing a LINQ chain in a hot loop with a single manual pass.
+- **Trade-off:** Manual loops are longer and easier to get subtly wrong. Only pay that cost where measurement says it matters.
+- **Common mistakes:** Enumerating a deferred query twice. `Any()` followed by `foreach`. `Contains` on a `List` inside a loop. Passing `List<T>` as `IEnumerable<T>` and losing the struct enumerator. `OrderBy` inside a loop instead of sorting once.
+- **Important:** The biggest LINQ win is usually algorithmic (a hash set instead of a linear scan), not syntactic. Fix the complexity first, then the allocations.
+
+---
+
+## Handle Strings Efficiently
+
+Strings are immutable, so every concatenation, substring, split, and interpolation allocates a new object and copies characters. String work is one of the largest allocation sources in typical business applications. The fixes are mechanical: build with `StringBuilder` when the shape is dynamic, parse with `ReadOnlySpan<char>` instead of `Split`, compare with `StringComparison.Ordinal` when you mean byte equality, and avoid materializing intermediate strings you immediately throw away.
+
+### Key concepts
+
+- **Immutability**: A `string` cannot be modified. `s += "x"` allocates a new string of length `n+1` and copies all `n` existing characters. Doing that in a loop is O(n²) copying.
+- **UTF-16**: .NET strings store 2 bytes per character. A 1,000-character string costs about 2,022 bytes on the heap including overhead.
+- **`StringBuilder`**: A growable chunked buffer. Appending amortizes to O(1) and `ToString()` allocates the final string once.
+- **`ReadOnlySpan<char>`**: A pointer plus length pointing into an existing string. Slicing a span allocates nothing, whereas `Substring` allocates a new string and copies.
+- **Ordinal vs culture-aware comparison**: `StringComparison.Ordinal` compares UTF-16 code units directly and can be vectorized. Culture-aware comparison consults collation tables and is 5x–50x slower.
+- **Interpolated string handler**: In modern C#, `$"..."` in certain APIs (logging, `StringBuilder.Append`, `Debug.Assert`) is compiled into a struct handler that can skip formatting entirely when the result is not needed.
+
+### How it works
+
+**Concatenation in a loop, step by step:**
+
+```csharp
+string s = "";
+for (int i = 0; i < 10_000; i++)
+    s += i.ToString();
+```
+
+1. Iteration 1: allocate a 1-char string, copy 0 existing chars.
+2. Iteration 2: allocate a 2-char string, copy 1 char.
+3. Iteration n: allocate an n-char string, copy n-1 chars.
+4. Total characters copied: about n²/2. For 10,000 iterations with ~4 chars each that is roughly 800 million character copies and 10,000 dead strings.
+
+**The same work with `StringBuilder`:**
+
+1. Allocate a chunk (default 16 chars, grows by doubling into a chunk list).
+2. Each append copies only the new characters into the current chunk.
+3. `ToString()` allocates the final string once and copies each character exactly once.
+4. Total characters copied: about 2n instead of n²/2.
+
+**Parsing with spans instead of `Split`:**
+
+`"a,b,c".Split(',')` allocates a `string[]` plus one string per field. Parsing a 1 million-line CSV with 10 fields allocates 11 million objects. `ReadOnlySpan<char>` slicing over the same line allocates nothing, because each slice is just an offset and a length into the original buffer.
+
+### Why inefficient string handling becomes a bottleneck
+
+- **Quadratic copying**: Building a 1 MB string by concatenation copies roughly 500 GB of characters. The same build with `StringBuilder` copies about 2 MB.
+- **Large Object Heap**: A string over about 42,500 characters (85 KB) goes to the LOH, which is not compacted by default and fragments over time.
+- **Allocation rate in parsers**: A log parser using `Split` on 100,000 lines/sec with 8 fields allocates 900,000 objects/sec, all dead immediately.
+- **Comparison cost**: `string.Equals(a, b)` with the default culture-aware comparison on a dictionary of 100,000 keys can be an order of magnitude slower than ordinal, and it can also produce surprising results across locales.
+- **Formatting in disabled paths**: `$"..."` evaluated eagerly and then discarded burns CPU and allocations for output nobody reads.
+
+### Example scenarios
+
+#### Scenario 1: Building a large payload
+
+**Problem**: An export builds a CSV of 200,000 rows by string concatenation. It takes 90 seconds and pushes the process to 3 GB.
+
+```csharp
+// ❌ Bad: O(n²) copying, one dead string per row, LOH churn
+public string BuildCsv(IReadOnlyList<Row> rows)
+{
+    string csv = "Id,Name,Amount\n";
+    foreach (var r in rows)
+        csv += r.Id + "," + r.Name + "," + r.Amount + "\n";
+    return csv;
+}
+```
+
+```csharp
+// ✅ Good: one buffer, amortized O(n), pre-sized to avoid regrowth
+public string BuildCsv(IReadOnlyList<Row> rows)
+{
+    // Estimate ~40 chars per row so the builder rarely grows
+    var sb = new StringBuilder(capacity: rows.Count * 40 + 16);
+    sb.Append("Id,Name,Amount\n");
+
+    foreach (var r in rows)
+    {
+        sb.Append(r.Id).Append(',')
+          .Append(r.Name).Append(',')
+          .Append(r.Amount).Append('\n');
+    }
+
+    return sb.ToString();
+}
+
+// ✅ Better for very large output: never materialize the whole string
+public async Task WriteCsvAsync(IReadOnlyList<Row> rows, Stream output)
+{
+    await using var writer = new StreamWriter(output, leaveOpen: true);
+    await writer.WriteLineAsync("Id,Name,Amount");
+
+    foreach (var r in rows)
+        await writer.WriteLineAsync($"{r.Id},{r.Name},{r.Amount}");
+}
+```
+
+**Results:**
+- **Bad**: About 90 seconds, 200,000 dead strings, peak memory around 3 GB.
+- **Good**: About 0.4 seconds with one final 8 MB string.
+- **Better**: Constant memory of a few KB because nothing large is ever materialized.
+- **Improvement**: Roughly 200x faster, and the streaming version removes the memory ceiling entirely.
+
+#### Scenario 2: Parsing without allocating
+
+**Problem**: A tail-follower parses 300,000 log lines per second. `Split` dominates the allocation profile.
+
+```csharp
+// ❌ Bad: allocates a string[] plus one string per field, per line
+public LogEntry Parse(string line)
+{
+    var parts = line.Split('|');                 // 1 array + N strings
+    return new LogEntry(
+        DateTime.Parse(parts[0]),
+        int.Parse(parts[1]),
+        parts[2].Trim());                        // Another allocation
+}
+```
+
+```csharp
+// ✅ Good: slice the original buffer, allocate only what you keep
+public LogEntry Parse(ReadOnlySpan<char> line)
+{
+    int p1 = line.IndexOf('|');
+    var timestampSpan = line[..p1];
+
+    var rest = line[(p1 + 1)..];
+    int p2 = rest.IndexOf('|');
+    var levelSpan = rest[..p2];
+    var messageSpan = rest[(p2 + 1)..].Trim();   // Trim on a span does not allocate
+
+    return new LogEntry(
+        DateTime.Parse(timestampSpan),           // Span overload, no intermediate string
+        int.Parse(levelSpan),
+        messageSpan.ToString());                 // Only the field we actually store
+}
+```
+
+**Results:**
+- **Bad**: 4 allocations per line. At 300,000 lines/sec that is 1.2 million objects/sec.
+- **Good**: 1 allocation per line, only for the field that outlives the call.
+- **Improvement**: 75% fewer allocations and roughly 2.5x faster parsing.
+
+#### Scenario 3: Comparison and lookup
+
+**Problem**: A case-insensitive header lookup over a dictionary is slower than expected and behaves differently on a Turkish-locale server.
+
+```csharp
+// ❌ Bad: culture-aware comparison, allocates lowercase copies, locale-dependent
+if (header.ToLower() == "content-type") { ... }
+
+var map = new Dictionary<string, string>();      // Default ordinal, but ToLower still allocates
+```
+
+```csharp
+// ✅ Good: ordinal-ignore-case comparison, no allocation, locale-independent
+if (header.Equals("content-type", StringComparison.OrdinalIgnoreCase)) { ... }
+
+// Let the dictionary do case-insensitive hashing without allocating keys
+var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+```
+
+**Results:**
+- **Bad**: One allocation per comparison plus culture table lookups, and a correctness bug where "I".ToLower() is not "i" in some locales.
+- **Good**: Zero allocation, vectorized comparison, identical behavior everywhere.
+- **Improvement**: About 5x faster comparisons, allocation removed, and a class of locale bugs eliminated.
+
+### Key takeaways
+
+- **Use for:** Any code that builds, parses, or compares strings in a loop, in a request path, or over large inputs.
+- **Rules:** `StringBuilder` (pre-sized) for dynamic building. Stream to a writer instead of building one giant string. `ReadOnlySpan<char>` for parsing. `StringComparison.Ordinal`/`OrdinalIgnoreCase` unless you genuinely need linguistic comparison. `StringComparer.OrdinalIgnoreCase` for dictionaries.
+- **Typical improvements:** 100x or more when replacing loop concatenation with a builder. 50%–90% fewer allocations when replacing `Split`/`Substring` with spans. About 5x on comparisons when switching to ordinal.
+- **Trade-off:** Span-based parsing is harder to read and cannot cross `await` boundaries or be stored in fields, since `ReadOnlySpan<T>` is a `ref struct`. Use `ReadOnlyMemory<char>` when you need to hold it across async calls.
+- **Common mistakes:** Concatenating in loops. `ToLower()`/`ToUpper()` just to compare. `Split` in a hot parser. Forgetting that `Substring` copies. Building a 100 MB string in memory instead of streaming it.
+- **Important:** The largest single win is usually not micro-optimizing a comparison, it is not materializing a string you were going to discard.
+
+---
+
+## Use async/await Correctly and Avoid Sync-over-Async
+
+Blocking on an asynchronous operation with `.Result`, `.Wait()`, or `GetAwaiter().GetResult()` destroys the benefit of async I/O and can deadlock or starve the thread pool. The thread that should have been released to serve other work instead sits blocked, and because the thread pool only injects one or two new threads per second when it detects starvation, a burst of blocked threads turns into seconds of queued latency for every other request. Using `await` all the way down keeps threads free and lets a small pool serve thousands of concurrent operations.
+
+### Key concepts
+
+- **State machine**: The compiler rewrites an `async` method into a struct implementing `IAsyncStateMachine`. Each `await` becomes a suspension point that stores locals in fields and registers a continuation.
+- **Thread release**: When you `await` an incomplete operation, the method returns to its caller and the thread goes back to the pool. It is not blocked and not sleeping. It runs other work.
+- **Continuation**: The code after the `await`. It is scheduled to run when the awaited operation completes, on a thread pool thread (or the captured context).
+- **SynchronizationContext**: An abstraction for "where continuations should run". WinForms/WPF have one that marshals back to the UI thread. ASP.NET Core has none, which is why `ConfigureAwait(false)` matters less there but still matters in libraries.
+- **Thread pool starvation**: All pool threads are blocked, so queued work items cannot run. The pool's hill-climbing algorithm adds threads slowly (roughly one or two per second), so recovery takes seconds or minutes.
+- **`ValueTask`**: A struct that avoids allocating a `Task` when the operation completes synchronously, which is the common case for buffered reads and cache hits. It may only be awaited once.
+
+### How it works
+
+**What blocking actually costs, step by step:**
+
+1. A request arrives and the pool assigns thread #7.
+2. The handler calls `httpClient.GetAsync(url).Result`.
+3. `GetAsync` starts the I/O and returns an incomplete `Task` immediately.
+4. `.Result` blocks thread #7 until that task completes.
+5. Thread #7 is now unavailable for 200 ms while doing nothing but waiting.
+6. Ten more requests arrive. They need threads #8 through #17, which also block.
+7. The pool has, say, 16 threads. All are blocked. New work items queue.
+8. The pool detects starvation and adds one thread per second. With 200 requests queued, recovery takes over three minutes.
+
+**What awaiting does instead:**
+
+1. Request arrives, pool assigns thread #7.
+2. Handler calls `await httpClient.GetAsync(url)`.
+3. The task is incomplete, so the method returns. Thread #7 goes back to the pool.
+4. Thread #7 immediately picks up the next request.
+5. 200 ms later the I/O completes and a continuation is queued. Any free thread runs it.
+6. Sixteen threads can hold thousands of in-flight requests, because a waiting request holds no thread.
+
+**The classic deadlock:** In a context that has a `SynchronizationContext` (UI, legacy ASP.NET), `.Result` blocks the context's only thread, while the continuation is queued to run on that same thread. Neither can proceed. ASP.NET Core has no such context, so the failure mode is starvation rather than immediate deadlock, which makes it harder to diagnose.
+
+### Why sync-over-async becomes a bottleneck
+
+- **One thread per in-flight operation**: Blocking makes concurrency cost about 1 MB of stack plus a scheduler slot per operation, instead of a few hundred bytes of state machine.
+- **Slow pool growth**: The pool deliberately adds threads slowly to avoid oversubscription. A burst that blocks 100 threads is not absorbed for a minute or more.
+- **Latency cliff**: While the queue drains at one thread per second, every queued request's latency grows linearly. P99 goes from 50 ms to 30 seconds with no change in downstream latency.
+- **`async void`**: Exceptions cannot be caught by the caller and crash the process. It also gives the caller no way to know when the work finished.
+- **Sequential awaits**: Awaiting three independent 100 ms calls one after another costs 300 ms. Awaiting them together costs 100 ms.
+
+### Example scenarios
+
+#### Scenario 1: Blocking in a controller
+
+**Problem**: An API endpoint calls two downstream services. Under load, P99 latency jumps to 20 seconds while the downstream services report 80 ms. Thread pool queue length grows to thousands.
+
+```csharp
+// ❌ Bad: blocks a pool thread for the entire duration of both calls
+[HttpGet("summary")]
+public IActionResult GetSummary(int id)
+{
+    var user = _userClient.GetUserAsync(id).Result;                 // Blocks
+    var orders = _orderClient.GetOrdersAsync(id).GetAwaiter().GetResult();  // Blocks
+
+    return Ok(new Summary(user, orders));
+}
+```
+
+```csharp
+// ✅ Good: releases the thread, and runs the two independent calls concurrently
+[HttpGet("summary")]
+public async Task<IActionResult> GetSummaryAsync(int id, CancellationToken ct)
+{
+    var userTask = _userClient.GetUserAsync(id, ct);
+    var ordersTask = _orderClient.GetOrdersAsync(id, ct);
+
+    await Task.WhenAll(userTask, ordersTask);   // Both in flight at once
+
+    return Ok(new Summary(userTask.Result, ordersTask.Result));
+}
+```
+
+**Results:**
+- **Bad**: 160 ms of blocked thread time per request. At 200 concurrent requests the 16-thread pool is exhausted and P99 hits 20 seconds.
+- **Good**: Zero blocked thread time. The two calls overlap, so latency is about 80 ms instead of 160 ms, and the pool never starves.
+- **Improvement**: 2x lower latency in the happy path and elimination of the starvation cliff under load.
+
+#### Scenario 2: A library that captures context
+
+**Problem**: A shared client library is used from both a desktop app and a server. On the desktop it occasionally deadlocks; on the server it shows unnecessary context switches.
+
+```csharp
+// ❌ Bad: captures the caller's SynchronizationContext on every await
+public async Task<Data> FetchAsync(string url)
+{
+    var response = await _http.GetAsync(url);            // Resumes on the UI thread
+    var json = await response.Content.ReadAsStringAsync();// Resumes on the UI thread
+    return Parse(json);                                   // Runs on the UI thread for no reason
+}
+```
+
+```csharp
+// ✅ Good: library code never needs the caller's context
+public async Task<Data> FetchAsync(string url, CancellationToken ct = default)
+{
+    var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
+    var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+    return Parse(json);
+}
+```
+
+**Results:**
+- **Bad**: Two marshaling operations back to the UI thread per call, and a deadlock if any caller ever blocks on the result.
+- **Good**: Continuations run on the thread pool. No marshaling, no deadlock risk from the library's side.
+- **Improvement**: Removes a deadlock class entirely and saves two context switches per call.
+
+#### Scenario 3: Allocating a Task for work that usually completes synchronously
+
+**Problem**: A cache read is called 5 million times per second. It almost always hits memory, but each call allocates a `Task<T>`.
+
+```csharp
+// ❌ Bad: allocates a Task even on the fast path
+public async Task<byte[]> ReadAsync(string key)
+{
+    if (_memory.TryGetValue(key, out var cached))
+        return cached;                      // Still allocates a Task<byte[]>
+
+    return await _remote.GetAsync(key);
+}
+```
+
+```csharp
+// ✅ Good: ValueTask returns without allocating when the value is already available
+public ValueTask<byte[]> ReadAsync(string key)
+{
+    if (_memory.TryGetValue(key, out var cached))
+        return new ValueTask<byte[]>(cached);   // No allocation
+
+    return new ValueTask<byte[]>(ReadRemoteAsync(key));
+
+    async Task<byte[]> ReadRemoteAsync(string k)
+    {
+        var value = await _remote.GetAsync(k).ConfigureAwait(false);
+        _memory.Set(k, value);
+        return value;
+    }
+}
+```
+
+**Results:**
+- **Bad**: One 72-byte `Task<byte[]>` per call. At 5 million calls/sec that is 360 MB/s of garbage.
+- **Good**: Zero allocation on the 95% of calls that hit memory.
+- **Improvement**: About 340 MB/s of allocation removed from the hottest path in the service.
+
+### Key takeaways
+
+- **Use for:** Every I/O-bound operation: HTTP, database, file, message broker, gRPC.
+- **Rules:** `await` all the way down. Never `.Result`, `.Wait()`, or `GetAwaiter().GetResult()` in application code. `ConfigureAwait(false)` in libraries. `async Task`, never `async void` except for event handlers. `Task.WhenAll` for independent operations. `ValueTask` only for hot paths that usually complete synchronously, and await it exactly once.
+- **Do not use `Task.Run` in ASP.NET Core** to make sync code "async". It moves the block to a different pool thread and adds a scheduling hop without freeing anything.
+- **Typical improvements:** An order of magnitude more concurrent requests per thread. Elimination of multi-second latency cliffs under load. 2x–3x lower latency when parallelizing independent calls.
+- **Trade-off:** Async colors the whole call stack, adds state machine allocations for genuinely asynchronous paths, and makes stack traces harder to read.
+- **Common mistakes:** Blocking in a constructor or property. `async void`. Awaiting independent calls sequentially. Awaiting a `ValueTask` twice. Using `Task.Run` to wrap synchronous work in a server.
+- **Important:** Thread pool starvation looks like a downstream problem: your service is slow while its dependencies look fine. Check the thread pool queue length before blaming the network.
+
+---
+
+## Use Fine-Grained Locking Instead of Global Locks
+
+A single lock around a whole data structure serializes every operation, so adding cores adds contention instead of throughput. Fine-grained locking splits the protected state so that operations touching different data proceed in parallel. The techniques are lock striping, per-key locks, reader-writer locks for read-heavy state, and keeping expensive work outside the critical section. Done well, a contended lock that capped a service at 3,000 operations/sec can scale to 40,000.
+
+### Key concepts
+
+- **Critical section**: The code between acquiring and releasing a lock. Only one thread executes it at a time, so its duration directly caps throughput.
+- **Contention**: Threads waiting for a lock another thread holds. Under contention, `lock` inflates into a kernel wait, costing microseconds instead of nanoseconds.
+- **Lock striping**: Splitting one lock into N locks, each protecting a slice of the data, chosen by hashing the key. Two threads touching different slices never block each other.
+- **`ReaderWriterLockSlim`**: Allows many concurrent readers or one exclusive writer. Beneficial when reads greatly outnumber writes and the critical section is long enough to justify its higher acquisition cost.
+- **`ConcurrentDictionary`**: Uses lock striping internally for writes and lock-free reads. Reads never block, so it is the default choice for shared maps.
+- **Convoy**: When a lock is held while doing slow work (I/O), every other thread queues behind it, and they stay queued long after the slow operation ends.
+
+### How it works
+
+**A global lock, step by step:**
+
+1. Thread A acquires the lock and updates one entry.
+2. Threads B through P (15 more) attempt to acquire it.
+3. They spin briefly, then block, each costing a context switch in and out.
+4. Throughput equals 1 divided by the critical section duration, regardless of core count.
+5. With a 10 µs critical section, the ceiling is 100,000 ops/sec no matter how many cores you add.
+
+**Striped locking, step by step:**
+
+1. Compute `stripe = key.GetHashCode() & (stripeCount - 1)`.
+2. Acquire only `_locks[stripe]`.
+3. Threads whose keys hash to different stripes run truly in parallel.
+4. With 64 stripes and uniform keys, expected contention drops by roughly 64x.
+5. The ceiling becomes 64 times higher, until some other resource binds.
+
+**Why keeping I/O out of the lock matters:** A critical section that does a 5 ms database call caps the whole system at 200 ops/sec. Moving the I/O outside and locking only the in-memory update, which takes 200 ns, raises the ceiling to millions.
+
+### Why global locks become a bottleneck
+
+- **Amdahl's law in practice**: If 30% of the work is serialized behind one lock, maximum speedup is 3.3x no matter how many cores exist.
+- **Context switch cost**: Each blocked acquisition costs roughly 1–10 µs of switching, which can exceed the work the lock protects.
+- **Cache line bouncing**: The lock word itself is written by every acquirer, so its cache line ping-pongs between cores, adding 100+ ns per transfer.
+- **Convoying**: One slow holder creates a queue that persists, so latency stays high long after the slow operation finished.
+- **False scaling signal**: Adding cores makes it worse, not better, which sends people looking in the wrong place.
+
+### Example scenarios
+
+#### Scenario 1: One lock over a shared cache
+
+**Problem**: An in-memory session store uses a single lock. At 16 cores it handles 3,000 ops/sec and CPU sits at 20%, because threads are waiting rather than working.
+
+```csharp
+// ❌ Bad: every operation on every key serializes through one lock
+public class SessionStore
+{
+    private readonly Dictionary<string, Session> _sessions = new();
+    private readonly object _lock = new();
+
+    public Session? Get(string id)
+    {
+        lock (_lock)                       // Readers block readers
+        {
+            return _sessions.TryGetValue(id, out var s) ? s : null;
+        }
+    }
+
+    public void Set(string id, Session s)
+    {
+        lock (_lock)
+        {
+            _sessions[id] = s;
+        }
+    }
+}
+```
+
+```csharp
+// ✅ Good: lock-free reads, striped writes, no shared lock word
+public class SessionStore
+{
+    private readonly ConcurrentDictionary<string, Session> _sessions = new();
+
+    public Session? Get(string id) =>
+        _sessions.TryGetValue(id, out var s) ? s : null;   // No lock at all
+
+    public void Set(string id, Session s) => _sessions[id] = s;  // Striped internally
+
+    public Session GetOrCreate(string id, Func<string, Session> factory) =>
+        _sessions.GetOrAdd(id, factory);
+}
+```
+
+**Results:**
+- **Bad**: 3,000 ops/sec ceiling, 20% CPU, most time in lock waits.
+- **Good**: Reads never block. Writes contend only when two keys land in the same stripe. About 40,000 ops/sec at 85% CPU.
+- **Improvement**: Roughly 13x throughput with no algorithmic change.
+
+#### Scenario 2: Per-key locking for expensive initialization
+
+**Problem**: A resource loader must build each item exactly once. A global lock means one thread builds while every other thread waits, even for unrelated keys.
+
+```csharp
+// ❌ Bad: one lock serializes construction of every key
+private readonly Dictionary<string, Resource> _cache = new();
+private readonly object _lock = new();
+
+public Resource Load(string key)
+{
+    lock (_lock)
+    {
+        if (!_cache.TryGetValue(key, out var r))
+        {
+            r = BuildExpensive(key);   // 500 ms, holding the global lock
+            _cache[key] = r;
+        }
+        return r;
+    }
+}
+```
+
+```csharp
+// ✅ Good: Lazy<T> gives per-key single initialization without a global lock
+private readonly ConcurrentDictionary<string, Lazy<Resource>> _cache = new();
+
+public Resource Load(string key)
+{
+    var lazy = _cache.GetOrAdd(
+        key,
+        k => new Lazy<Resource>(() => BuildExpensive(k),
+                                LazyThreadSafetyMode.ExecutionAndPublication));
+
+    return lazy.Value;   // Only threads asking for THIS key wait
+}
+```
+
+**Results:**
+- **Bad**: Loading 10 different keys concurrently takes 5 seconds because they serialize.
+- **Good**: The 10 builds run in parallel, taking about 500 ms total. Duplicate work for the same key is still prevented.
+- **Improvement**: 10x faster cold start, with the same once-only guarantee.
+
+#### Scenario 3: Read-heavy configuration state
+
+**Problem**: A routing table is read on every request and updated once a minute. A plain `lock` makes every read serialize.
+
+```csharp
+// ❌ Bad: readers block each other for a table that almost never changes
+private RouteTable _table = RouteTable.Empty;
+private readonly object _lock = new();
+
+public Route? Resolve(string path)
+{
+    lock (_lock)
+    {
+        return _table.Find(path);
+    }
+}
+```
+
+```csharp
+// ✅ Good: immutable snapshot swapped atomically. Readers take no lock at all.
+private volatile RouteTable _table = RouteTable.Empty;
+
+public Route? Resolve(string path) => _table.Find(path);   // Lock-free read
+
+public void Update(RouteTable newTable)
+{
+    // Build the new table off to the side, then publish it in one atomic write
+    Volatile.Write(ref _table, newTable);
+}
+```
+
+**Results:**
+- **Bad**: Every read acquires a lock. At 50,000 reads/sec across 16 cores the lock word's cache line bounces constantly.
+- **Good**: Reads are a single volatile field read plus the lookup. Writers never block readers; readers see either the old or the new table, never a torn one.
+- **Improvement**: Read path becomes roughly 20x cheaper and scales linearly with cores.
+
+### Key takeaways
+
+- **Use for:** Any shared mutable state touched by multiple threads at meaningful rates. Especially caches, registries, counters, and routing tables.
+- **Order of preference:** No shared state, then immutable snapshot with atomic swap, then `ConcurrentDictionary`/`Interlocked`, then striped or per-key locks, then `ReaderWriterLockSlim`, then a global lock as a last resort.
+- **Rules:** Never do I/O, allocation-heavy work, or call unknown code inside a lock. Keep critical sections to nanoseconds. Never `await` inside `lock` (it will not compile; use `SemaphoreSlim.WaitAsync` if you truly need an async gate).
+- **Typical improvements:** 5x–15x throughput when replacing a global lock with striping or a concurrent collection on a contended path.
+- **Trade-off:** More locks means more complexity and more ways to deadlock. `ReaderWriterLockSlim` has higher single-thread cost than `lock`, so it only pays off with genuine read concurrency and non-trivial critical sections.
+- **Common mistakes:** Holding a lock across an HTTP or database call. Using `ReaderWriterLockSlim` for a two-nanosecond read where `lock` would be cheaper. Locking on `this` or on a public object. Assuming `ConcurrentDictionary.GetOrAdd` calls the factory only once (it can call it more than once; use `Lazy<T>` when construction must be unique).
+- **Important:** Measure lock contention directly (contention counters or a profiler) before restructuring. Contention is often in a different lock than the one you suspect.
+
+---
+
+## Use SIMD and Vectorization for Data-Parallel Loops
+
+SIMD (Single Instruction, Multiple Data) lets one CPU instruction operate on 4, 8, 16, or more values at once. A modern x64 core with AVX2 processes 8 integers per instruction; with AVX-512 it processes 16. The .NET JIT does not auto-vectorize your loops, so if you want SIMD you must write it explicitly with `Vector<T>` or the `System.Runtime.Intrinsics` types. For arithmetic over large contiguous arrays this delivers 4x–16x, provided the loop is compute-bound rather than memory-bandwidth-bound and the data is laid out contiguously.
+
+### Key concepts
+
+- **SIMD register**: A wide register holding several values. 128-bit (`Vector128`) holds 4 ints, 256-bit (`Vector256`) holds 8, 512-bit (`Vector512`) holds 16.
+- **Lane**: One element position inside a vector. Operations apply to all lanes simultaneously.
+- **`Vector<T>`**: A variable-width vector whose size is chosen at JIT time based on the hardware. Write once, get the widest available. `Vector<T>.Count` tells you how many elements fit.
+- **`Vector128/256/512<T>`**: Fixed-width vectors with explicit hardware feature checks (`Avx2.IsSupported`). More control, more code.
+- **Tail handling**: If the array length is not a multiple of the vector width, the remaining elements must be processed with a scalar loop.
+- **Horizontal operation**: Combining lanes within one vector, such as summing all 8 lanes into one value. These are more expensive than lane-wise operations, so do them once at the end, not inside the loop.
+- **Memory-bandwidth bound**: When the loop's speed is limited by how fast data arrives from RAM rather than by arithmetic. SIMD does not help here, because the bottleneck is already the memory bus.
+
+### How it works
+
+**Scalar loop, per iteration:**
+
+1. Load `a[i]` into a register.
+2. Load `b[i]` into a register.
+3. Add.
+4. Store to `c[i]`.
+5. Increment, compare, branch.
+
+For 8 elements: 8 loads, 8 loads, 8 adds, 8 stores, 8 branches.
+
+**Vectorized loop, per iteration:**
+
+1. Load 8 values of `a` into one 256-bit register (one instruction).
+2. Load 8 values of `b` (one instruction).
+3. Add all 8 pairs (one instruction).
+4. Store 8 results (one instruction).
+5. Increment by 8, compare, branch.
+
+For the same 8 elements: 1 load, 1 load, 1 add, 1 store, 1 branch. Roughly 8x fewer instructions.
+
+**Why data layout decides whether this is possible:** SIMD loads a contiguous 32-byte block. If your values are fields inside objects scattered on the heap (array of structs with many fields, or an array of class references), the values you want are not adjacent and cannot be loaded into one register. Struct-of-arrays layout, where each field lives in its own contiguous array, is a prerequisite.
+
+### Why scalar loops leave performance on the table
+
+- **Idle hardware**: Every modern core has SIMD units. A scalar loop uses one lane out of 8 or 16, wasting 87%–94% of the available arithmetic width.
+- **Instruction overhead per element**: Loop bookkeeping (increment, compare, branch) is paid once per element instead of once per 8 or 16 elements.
+- **Branch mispredictions**: A scalar loop with a condition per element mispredicts on unpredictable data. Vectorized code replaces the branch with a mask, eliminating misprediction entirely.
+- **Missed built-ins**: Many framework methods are already vectorized (`Span.IndexOf`, `Span.Contains`, `Span.SequenceEqual`, `TensorPrimitives.Sum`). Hand-written scalar loops replacing them are strictly slower.
+
+### Example scenarios
+
+#### Scenario 1: Element-wise arithmetic over large arrays
+
+**Problem**: A pricing engine multiplies and sums 10 million floats per batch. The scalar loop takes 38 ms and the CPU is compute-bound.
+
+```csharp
+// ❌ Bad: one element per instruction, 8x of the arithmetic width unused
+public static float DotProduct(float[] a, float[] b)
+{
+    float sum = 0;
+    for (int i = 0; i < a.Length; i++)
+        sum += a[i] * b[i];
+    return sum;
+}
+```
+
+```csharp
+// ✅ Good: Vector<T> adapts to the widest SIMD the CPU supports
+public static float DotProduct(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+{
+    int width = Vector<float>.Count;      // 8 on AVX2, 16 on AVX-512
+    var acc = Vector<float>.Zero;
+
+    int i = 0;
+    for (; i <= a.Length - width; i += width)
+    {
+        var va = new Vector<float>(a.Slice(i, width));
+        var vb = new Vector<float>(b.Slice(i, width));
+        acc += va * vb;                   // width multiplications and adds in one step
+    }
+
+    float sum = Vector.Dot(acc, Vector<float>.One);   // Horizontal sum, once
+
+    for (; i < a.Length; i++)             // Tail: the remaining < width elements
+        sum += a[i] * b[i];
+
+    return sum;
+}
+
+// ✅ Better when a built-in exists: the framework's version is already tuned
+public static float DotProductBuiltIn(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    => TensorPrimitives.Dot(a, b);
+```
+
+**Results:**
+- **Bad**: 38 ms for 10 million elements.
+- **Good**: About 6 ms on AVX2, about 3.5 ms on AVX-512.
+- **Improvement**: Roughly 6x, limited by memory bandwidth rather than the theoretical 8x.
+
+#### Scenario 2: Replacing a branchy filter with a mask
+
+**Problem**: Counting values above a threshold over unpredictable data costs 20% of CPU in branch mispredictions.
+
+```csharp
+// ❌ Bad: one unpredictable branch per element, ~50% misprediction rate
+public static int CountAbove(int[] values, int threshold)
+{
+    int count = 0;
+    for (int i = 0; i < values.Length; i++)
+    {
+        if (values[i] > threshold)   // Mispredicts constantly on random data
+            count++;
+    }
+    return count;
+}
+```
+
+```csharp
+// ✅ Good: comparison produces a mask, no branch at all
+public static int CountAbove(ReadOnlySpan<int> values, int threshold)
+{
+    int width = Vector<int>.Count;
+    var thresholdVec = new Vector<int>(threshold);
+    var counts = Vector<int>.Zero;
+    var ones = Vector<int>.One;
+
+    int i = 0;
+    for (; i <= values.Length - width; i += width)
+    {
+        var v = new Vector<int>(values.Slice(i, width));
+        // GreaterThan yields all-ones (-1) per lane where true, 0 where false
+        var mask = Vector.GreaterThan(v, thresholdVec);
+        counts += Vector.ConditionalSelect(mask, ones, Vector<int>.Zero);
+    }
+
+    int count = 0;
+    for (int lane = 0; lane < width; lane++)
+        count += counts[lane];
+
+    for (; i < values.Length; i++)
+        if (values[i] > threshold) count++;
+
+    return count;
+}
+```
+
+**Results:**
+- **Bad**: About 11 ms for 10 million elements, dominated by mispredictions.
+- **Good**: About 1.4 ms. No branches in the vector loop, so no mispredictions.
+- **Improvement**: Roughly 8x, combining SIMD width with branch elimination.
+
+#### Scenario 3: Data layout blocking vectorization
+
+**Problem**: A particle simulation cannot be vectorized because positions are fields inside a struct array.
+
+```csharp
+// ❌ Bad: Array of Structs. X values are 32 bytes apart, cannot fill a vector.
+public struct Particle { public float X, Y, Z; public float Mass; public int Id; public bool Alive; }
+
+Particle[] particles = new Particle[1_000_000];
+
+for (int i = 0; i < particles.Length; i++)
+    particles[i].X += velocity;      // Scalar only: X values are not contiguous
+```
+
+```csharp
+// ✅ Good: Struct of Arrays. Each field is contiguous and vector-loadable.
+public sealed class ParticleSystem
+{
+    public float[] X = new float[1_000_000];
+    public float[] Y = new float[1_000_000];
+    public float[] Z = new float[1_000_000];
+    public float[] Mass = new float[1_000_000];
+
+    public void Advance(float velocity)
+    {
+        var span = X.AsSpan();
+        int width = Vector<float>.Count;
+        var v = new Vector<float>(velocity);
+
+        int i = 0;
+        for (; i <= span.Length - width; i += width)
+        {
+            var chunk = new Vector<float>(span.Slice(i, width));
+            (chunk + v).CopyTo(span.Slice(i, width));
+        }
+
+        for (; i < span.Length; i++)
+            span[i] += velocity;
+    }
+}
+```
+
+**Results:**
+- **Bad**: Vectorization impossible. Also loads 32 bytes per cache line to use 4, wasting 87% of memory bandwidth.
+- **Good**: Fully vectorizable, and every loaded cache line is fully used.
+- **Improvement**: About 7x from SIMD plus a further gain from cache efficiency.
+
+### Key takeaways
+
+- **Use for:** Large contiguous numeric arrays, image and signal processing, checksums and hashing, encoding and decoding, search over byte or char buffers, aggregations.
+- **Avoid when:** The collection is small (under a few hundred elements the setup and tail cost dominate), data is not contiguous, the loop has dependencies between iterations, or the loop is already memory-bandwidth bound.
+- **Check for a built-in first:** `Span.IndexOf`, `Span.SequenceEqual`, `Span.Contains`, `TensorPrimitives.*`, `System.IO.Hashing`, and `Convert.ToHexString` are already vectorized and better tested than hand-written code.
+- **Typical improvements:** 4x–8x with AVX2 for compute-bound loops, up to 16x with AVX-512, plus a large extra gain when it also removes unpredictable branches.
+- **Trade-off:** Substantially harder to read, requires explicit tail handling, and needs `Vector.IsHardwareAccelerated` checks plus a scalar fallback. Verify with benchmarks on the target hardware, not assumptions.
+- **Common mistakes:** Forgetting the tail loop and losing the last few elements. Doing a horizontal sum inside the loop instead of once at the end. Vectorizing a memory-bound loop and seeing no gain. Assuming the JIT auto-vectorizes (it does not).
+- **Important:** SIMD requires struct-of-arrays layout. If the data layout is wrong, fix that first, since it usually delivers a large win on its own through better cache utilization.
+
+---
+
+## Apply Backpressure with Bounded Queues
+
+An unbounded queue does not absorb overload, it hides it. When producers outpace consumers, the queue grows until memory runs out, and every item added past that point sits in a queue longer than its own deadline. A bounded queue converts that failure into a signal: the producer is forced to slow down, block, or reject, and latency stays predictable. This is the single most important structural defense against overload in a service, and it costs one parameter.
+
+### Key concepts
+
+- **Backpressure**: A downstream component signaling upstream to slow down. Implemented as blocking the producer, dropping items, or rejecting the request.
+- **Bounded queue**: A queue with a maximum capacity. Once full, adding either waits, drops, or fails, according to policy.
+- **Little's law**: L = λ × W. Items in the system equals arrival rate times time in the system. Rearranged: W = L / λ. A queue of 10,000 items served at 1,000 items/sec adds 10 seconds of latency, no matter how fast each item is processed.
+- **Queue delay**: Time an item spends waiting rather than being worked on. It is pure latency with no benefit.
+- **Drop policy**: What happens when the queue is full. `Wait` blocks the producer, `DropOldest` discards the stalest item, `DropWrite` discards the new one.
+- **Load shedding**: Deliberately rejecting work you cannot complete in time, so that the work you accept still meets its deadline.
+
+### How it works
+
+**Unbounded queue under overload, step by step:**
+
+1. Arrival rate is 1,200 items/sec. Consumer capacity is 1,000 items/sec.
+2. The queue grows by 200 items every second.
+3. After 60 seconds it holds 12,000 items. By Little's law each new item waits 12 seconds before being touched.
+4. Callers time out at 5 seconds, so the consumer processes items nobody is waiting for anymore.
+5. Memory grows linearly. Eventually the process is killed, losing everything in the queue.
+
+**Bounded queue under the same overload:**
+
+1. Capacity is set to 1,000 items, which at 1,000 items/sec is exactly 1 second of queue delay.
+2. Arrival rate 1,200/sec fills it in 5 seconds.
+3. From then on, `TryWrite` fails for 200 items/sec, and the caller gets an immediate 503 with `Retry-After`.
+4. Latency for accepted work stays bounded at about 1 second, which is inside the timeout.
+5. Memory is constant. The system degrades predictably instead of collapsing.
+
+**Sizing the queue:** Pick the maximum acceptable queue delay, multiply by throughput. If you can tolerate 500 ms of queueing and you process 2,000 items/sec, the bound is 1,000. A larger bound only buys the ability to absorb longer bursts, at the cost of higher worst-case latency.
+
+### Why unbounded queues become a bottleneck
+
+- **Latency growth is unbounded**: Queue delay grows linearly with backlog. There is no self-correction.
+- **Wasted work**: Items processed after their caller timed out consume full capacity and produce nothing.
+- **Memory exhaustion**: Each queued item holds its payload and any captured state. A million queued 4 KB messages is 4 GB.
+- **Failure is catastrophic rather than graceful**: Instead of shedding 20% of load, the process dies and drops 100%.
+- **The bottleneck moves invisibly**: The queue absorbs the symptom, so dashboards look fine until the moment everything falls over.
+
+### Example scenarios
+
+#### Scenario 1: An unbounded ingestion pipeline
+
+**Problem**: A telemetry endpoint accepts events and queues them for a database writer. During a traffic spike, memory grows to 6 GB and the pod is killed, losing all buffered events.
+
+```csharp
+// ❌ Bad: unbounded channel. Producers never slow down. Memory is the only limit.
+private readonly Channel<Event> _channel = Channel.CreateUnbounded<Event>();
+
+[HttpPost("events")]
+public IActionResult Ingest(Event e)
+{
+    _channel.Writer.TryWrite(e);   // Always succeeds, even at 10x capacity
+    return Accepted();
+}
+```
+
+```csharp
+// ✅ Good: bounded channel sized to an acceptable queue delay, with explicit shedding
+private readonly Channel<Event> _channel = Channel.CreateBounded<Event>(
+    new BoundedChannelOptions(capacity: 10_000)
+    {
+        FullMode = BoundedChannelFullMode.Wait,   // Producers await instead of piling up
+        SingleReader = true,
+        SingleWriter = false
+    });
+
+[HttpPost("events")]
+public async Task<IActionResult> IngestAsync(Event e, CancellationToken ct)
+{
+    // Give the queue a short window to make room; if it cannot, shed the request
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    timeout.CancelAfter(TimeSpan.FromMilliseconds(50));
+
+    try
+    {
+        await _channel.Writer.WriteAsync(e, timeout.Token);
+        return Accepted();
+    }
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+    {
+        Response.Headers.RetryAfter = "1";
+        return StatusCode(StatusCodes.Status503ServiceUnavailable);   // Fast, honest failure
+    }
+}
+```
+
+**Results:**
+- **Bad**: Memory grows without limit, pod killed after about 4 minutes, 100% of buffered events lost.
+- **Good**: Memory constant at roughly 10,000 events. Under a 30% overspike, about 30% of requests get a 503 in 50 ms and the rest are processed within the deadline.
+- **Improvement**: Failure changes from total data loss to a bounded, retryable rejection rate.
+
+#### Scenario 2: Metrics where the newest value matters most
+
+**Problem**: A gauge publisher falls behind. Old values are queued and published minutes late, while the current value waits behind them.
+
+```csharp
+// ❌ Bad: stale values block fresh ones and the queue never drains
+private readonly Channel<Sample> _samples = Channel.CreateUnbounded<Sample>();
+```
+
+```csharp
+// ✅ Good: keep only the freshest samples, drop the stale ones automatically
+private readonly Channel<Sample> _samples = Channel.CreateBounded<Sample>(
+    new BoundedChannelOptions(capacity: 256)
+    {
+        FullMode = BoundedChannelFullMode.DropOldest,   // Newest data wins
+        SingleReader = true
+    });
+
+public void Publish(Sample s) => _samples.Writer.TryWrite(s);   // Never blocks, never fails
+```
+
+**Results:**
+- **Bad**: Published values lag reality by minutes, and the lag grows.
+- **Good**: Published values are always within 256 samples of current. Old samples are dropped silently, which is correct for a gauge.
+- **Improvement**: Freshness guaranteed, memory bounded, and the producer is never blocked.
+
+#### Scenario 3: Limiting concurrency against a fragile dependency
+
+**Problem**: A batch job fires 5,000 concurrent calls at a downstream service that handles 50. The dependency collapses and takes the caller with it.
+
+```csharp
+// ❌ Bad: unbounded fan-out. Concurrency equals the size of the input.
+var tasks = items.Select(i => _client.SendAsync(i));
+await Task.WhenAll(tasks);   // 5,000 in flight at once
+```
+
+```csharp
+// ✅ Good: explicit concurrency limit sized to what the dependency can take
+await Parallel.ForEachAsync(
+    items,
+    new ParallelOptions
+    {
+        MaxDegreeOfParallelism = 50,          // Never more than 50 in flight
+        CancellationToken = ct
+    },
+    async (item, token) => await _client.SendAsync(item, token));
+
+// ✅ Alternative when you need the limit around arbitrary code
+private readonly SemaphoreSlim _limiter = new(initialCount: 50, maxCount: 50);
+
+public async Task<Result> CallAsync(Item item, CancellationToken ct)
+{
+    await _limiter.WaitAsync(ct);
+    try
+    {
+        return await _client.SendAsync(item, ct);
+    }
+    finally
+    {
+        _limiter.Release();
+    }
+}
+```
+
+**Results:**
+- **Bad**: The dependency's queues overflow, its latency goes to 30 seconds, and every one of the 5,000 calls times out. Total failure.
+- **Good**: 50 in flight, the dependency stays at its healthy operating point, and total throughput is higher because nothing times out or is retried.
+- **Improvement**: The job completes rather than failing, and usually finishes faster than the unbounded version despite lower concurrency.
+
+### Key takeaways
+
+- **Use for:** Every producer-consumer boundary: ingestion queues, background job pipelines, logging sinks, outbound call fan-out, message broker consumers.
+- **Rules:** Never create an unbounded queue in a service. Size the bound from acceptable queue delay times throughput, not from a round number. Choose the full-mode policy deliberately: `Wait` for work that must not be lost, `DropOldest` for gauges and freshness-sensitive data, reject with 503 at the API edge.
+- **Typical improvements:** Converts an unbounded latency growth and OOM crash into a bounded latency and a known rejection rate. Concurrency limits often increase total throughput because they stop the downstream from thrashing.
+- **Trade-off:** You will drop or reject work under overload. That is the point, but it must be visible: emit a metric for every rejection and every drop.
+- **Common mistakes:** Unbounded `Channel`, `BlockingCollection`, or `ConcurrentQueue` in production. Sizing the bound to "large enough" instead of to a latency budget. Blocking the producer at the HTTP edge instead of returning 503. Dropping silently with no metric.
+- **Important:** Backpressure must propagate all the way to the client. A bounded internal queue that the API edge never signals just moves the unbounded growth to the load balancer.
+
+---
+
+## Avoid N+1 Queries
+
+An N+1 query happens when code executes one query to fetch a list, then one more query per item in that list. The code looks like a simple loop, but each iteration pays a full network round-trip plus query parsing and planning on the server. Fetching 500 orders with their customer becomes 501 queries and, at 1 ms round-trip each, half a second of pure latency for work the database could have done in a single 5 ms query. The fix is to fetch related data in one query with a join, a projection, or a single batched `IN` lookup.
+
+### Key concepts
+
+- **Round-trip**: One request-response cycle to the database. Even on the same host it costs 0.2–1 ms; across a network or cloud availability zone it costs 1–10 ms. This cost is paid per query, independent of how much data is returned.
+- **Lazy loading**: An ORM feature where accessing a navigation property triggers a query on demand. It is the most common source of N+1 because the query is invisible at the call site.
+- **Eager loading**: Explicitly telling the ORM to fetch related data together, usually with a join.
+- **Projection**: Selecting exactly the columns you need into a DTO, so the ORM generates one flat query instead of loading full entities and their graphs.
+- **Cartesian explosion**: The opposite failure. Joining several one-to-many collections in a single query multiplies rows: 100 orders × 10 lines × 5 payments returns 5,000 rows carrying massively duplicated parent data.
+- **Split query**: Fetching a parent collection and each child collection in a small fixed number of queries (typically 2 or 3) instead of one exploded join or N+1 queries.
+
+### How it works
+
+**What the database does for each of the N queries:**
+
+1. Receive the packet and parse the SQL text.
+2. Look up the plan in the plan cache, or compile a new plan.
+3. Acquire the necessary latches and read pages, usually already in the buffer pool.
+4. Serialize the single row and send it back.
+5. The client deserializes it and materializes an object.
+
+Steps 1, 2, 4, and 5 are fixed overhead that does not shrink because the query is small. That is why 500 tiny queries cost far more than one query returning 500 rows: the per-row work is trivial, the per-query work is not.
+
+**What a single joined query does instead:** One parse, one plan, one index scan or seek plus a join, one result stream. The server does more work per query but far less total work, and the client pays one round-trip instead of 501.
+
+### Why N+1 becomes a bottleneck
+
+- **Latency multiplication**: 500 queries × 1 ms round-trip is 500 ms of latency that no amount of index tuning removes, because the time is spent on the wire.
+- **Connection pool exhaustion**: Each query holds a pooled connection briefly. A handler doing 500 sequential queries occupies a connection roughly 500 times longer than one doing a single query, so concurrent capacity drops proportionally.
+- **Server CPU on parsing and planning**: 500 parse-and-lookup cycles per request, multiplied by every concurrent request, becomes a measurable share of database CPU.
+- **It scales with data, not with load**: The problem is invisible in development with 10 rows and catastrophic in production with 10,000. Latency grows linearly with result size.
+- **It hides behind clean-looking code**: `foreach (var o in orders) Console.Write(o.Customer.Name);` has no visible query. Only the database log reveals it.
+
+### Example scenarios
+
+#### Scenario 1: Lazy loading inside a loop
+
+**Problem**: An orders endpoint returns 200 orders with customer names. The endpoint takes 420 ms; the database reports 201 queries, each about 0.4 ms of server time.
+
+```csharp
+// ❌ Bad: 1 query for orders, then 1 query per order for the customer
+var orders = await _db.Orders
+    .Where(o => o.CreatedAt >= since)
+    .ToListAsync(ct);                       // Query 1
+
+var result = new List<OrderDto>(orders.Count);
+foreach (var o in orders)
+{
+    // Accessing the navigation property triggers a separate SELECT per order
+    result.Add(new OrderDto(o.Id, o.Total, o.Customer.Name));   // Queries 2..201
+}
+```
+
+```csharp
+// ✅ Good: one query, projecting only the columns actually needed
+var result = await _db.Orders
+    .Where(o => o.CreatedAt >= since)
+    .Select(o => new OrderDto(o.Id, o.Total, o.Customer.Name))  // Becomes a JOIN
+    .AsNoTracking()
+    .ToListAsync(ct);                       // Exactly 1 query
+```
+
+**Results:**
+- **Bad**: 201 round-trips, about 420 ms end to end, connection held for the whole loop.
+- **Good**: 1 round-trip, about 8 ms end to end, and less data transferred because only three columns are selected.
+- **Improvement**: Roughly 50x lower latency and 200x fewer queries.
+
+#### Scenario 2: Batching when a join is not possible
+
+**Problem**: Order data comes from the database but enrichment comes from a separate service or a second store, so a SQL join is not an option.
+
+```csharp
+// ❌ Bad: one lookup per order
+foreach (var order in orders)
+{
+    var price = await _pricing.GetPriceAsync(order.ProductId, ct);   // N round-trips
+    order.Price = price;
+}
+```
+
+```csharp
+// ✅ Good: collect the keys, do one batched lookup, then join in memory
+var productIds = orders.Select(o => o.ProductId).Distinct().ToArray();
+
+// One call returning all prices, e.g. WHERE product_id = ANY(@ids)
+var prices = await _pricing.GetPricesAsync(productIds, ct);
+var priceById = prices.ToDictionary(p => p.ProductId, p => p.Amount);
+
+foreach (var order in orders)
+{
+    if (priceById.TryGetValue(order.ProductId, out var amount))
+        order.Price = amount;                // O(1) in-memory lookup
+}
+```
+
+**Results:**
+- **Bad**: 200 round-trips at 2 ms each, about 400 ms, and 200 units of load on the pricing service.
+- **Good**: 1 round-trip, about 6 ms, and duplicate product IDs collapsed by `Distinct`.
+- **Improvement**: About 65x faster and a large reduction in downstream load.
+
+#### Scenario 3: Fixing N+1 into a cartesian explosion
+
+**Problem**: Someone replaces N+1 with a single query joining two collections. The query count drops to 1, but the response gets slower and memory spikes.
+
+```csharp
+// ❌ Bad: joining two one-to-many collections multiplies rows
+var orders = await _db.Orders
+    .Include(o => o.Lines)          // 10 per order
+    .Include(o => o.Payments)       // 5 per order
+    .Where(o => o.CreatedAt >= since)
+    .ToListAsync(ct);
+// 200 orders × 10 lines × 5 payments = 10,000 rows, each repeating all order columns
+```
+
+```csharp
+// ✅ Good: split into a small fixed number of queries, no duplication
+var orders = await _db.Orders
+    .Include(o => o.Lines)
+    .Include(o => o.Payments)
+    .Where(o => o.CreatedAt >= since)
+    .AsSplitQuery()                 // 3 queries total: orders, lines, payments
+    .AsNoTracking()
+    .ToListAsync(ct);
+// 200 + 2,000 + 1,000 = 3,200 rows instead of 10,000, with no repeated parent data
+```
+
+**Results:**
+- **Bad**: 1 query but 10,000 rows carrying duplicated order data. About 40 MB transferred and heavy client-side deduplication.
+- **Good**: 3 queries, 3,200 rows, about 4 MB transferred.
+- **Improvement**: Roughly 10x less data on the wire, 3 round-trips instead of 201, and no cartesian blowup.
+
+### Key takeaways
+
+- **Use for:** Any code that iterates a collection and touches a related entity, external service, or second data store inside the loop.
+- **Rules:** Project into DTOs instead of loading full entity graphs. Use `Include` with `AsSplitQuery` when you must materialize multiple collections. Batch external lookups by collecting keys first. Turn off lazy loading in server applications so N+1 becomes a compile-time-visible decision.
+- **Detect it:** Log query counts per request. Any request issuing more queries than a small constant is suspect. In development, fail the test when a single request exceeds a threshold.
+- **Typical improvements:** 10x–100x lower latency on list endpoints, plus a proportional reduction in database CPU and connection pool pressure.
+- **Trade-off:** A single joined query does more work on the database server and can transfer duplicated columns. Split queries lose transactional consistency across the parts unless wrapped in a transaction.
+- **Common mistakes:** Leaving lazy loading enabled. Fixing N+1 with `Include` on several collections and creating a cartesian explosion. Batching but forgetting `Distinct`, so the same key is fetched many times. Assuming an index fixes it, when the cost is round-trips, not scanning.
+- **Important:** N+1 is a latency problem, not a throughput problem on the server. Faster disks and better indexes will not help; only removing round-trips will.
+
+---
+
+## Design Indexes for Your Query Patterns
+
+An index is a sorted structure that lets the database find rows without scanning the table. The right index turns a query from reading a million pages to reading four. The wrong index is dead weight that slows every insert, update, and delete while never being used. Index design is driven entirely by the queries you actually run: the columns in `WHERE`, their order, the columns in `ORDER BY`, and the columns you select.
+
+### Key concepts
+
+- **B-tree**: The default index structure. A balanced tree where each node is a page. Finding a value takes O(log n) page reads, typically 3–4 for millions of rows, because the fan-out per page is high.
+- **Seek**: Navigating the tree directly to matching rows. Cost is proportional to the number of matches, not the table size.
+- **Scan**: Reading every page of the table or index. Cost is proportional to table size regardless of how few rows match.
+- **Selectivity**: The fraction of rows a condition matches. A condition matching 0.1% of rows is highly selective and benefits enormously from an index. One matching 40% usually does not, because a scan is cheaper than millions of random lookups.
+- **Composite index**: An index on several columns. Sorted by the first column, then the second within equal firsts, and so on. Order matters absolutely.
+- **Covering index**: An index that contains every column a query needs, so the database answers entirely from the index and never touches the table. Extra columns are added with `INCLUDE` (SQL Server) or by adding them to the key (PostgreSQL, or `INCLUDE` in PG 11+).
+- **Key lookup / heap fetch**: The extra read required when an index identifies a row but does not contain all requested columns. Doing this thousands of times is often slower than a plain scan.
+
+### How it works
+
+**How a composite index on `(customer_id, created_at)` is stored:**
+
+Entries are ordered by `customer_id` first, then by `created_at` within each customer. This makes three query shapes fast:
+
+1. `WHERE customer_id = 42` — a seek to the customer's block.
+2. `WHERE customer_id = 42 AND created_at > '2026-01-01'` — a seek to the customer, then a range scan forward. Optimal.
+3. `WHERE customer_id = 42 ORDER BY created_at` — a seek, then read in order. The sort is free.
+
+And one shape it cannot help:
+
+4. `WHERE created_at > '2026-01-01'` — the entries for a given date are spread across every customer's block, so the index is useless. This needs `(created_at)` as the leading column.
+
+**The rule that follows:** put equality columns first, then the range or sort column last. An index on `(created_at, customer_id)` cannot answer query 1 efficiently, while `(customer_id, created_at)` answers all three.
+
+**What a covering index changes, step by step:**
+
+Without covering: seek the index to find 5,000 matching row pointers, then perform 5,000 random reads into the table to fetch the other columns. Those 5,000 random I/Os dominate.
+
+With covering: seek the index and read the needed columns directly from the leaf pages, sequentially. Zero table access.
+
+### Why bad indexing becomes a bottleneck
+
+- **Full scans under load**: A query scanning a 5 GB table takes seconds and evicts the buffer pool, slowing every other query on the server.
+- **Key lookup amplification**: A plan that seeks then performs 50,000 key lookups can be 10x slower than a sequential scan, because random I/O is far more expensive per row.
+- **Write cost of every index**: Each index must be updated on every insert, update of an indexed column, and delete. A table with 12 indexes pays 12 B-tree modifications per insert. Insert throughput can drop 3x–5x.
+- **Wrong column order**: An index that looks right but has the range column first is silently unusable for the query it was created for, so it costs writes and delivers nothing.
+- **Index bloat and cache pressure**: Unused indexes occupy buffer pool space that would otherwise cache useful data, indirectly slowing everything.
+
+### Example scenarios
+
+#### Scenario 1: Column order in a composite index
+
+**Problem**: A dashboard query filtering by customer and date range takes 2.3 seconds. An index exists but the plan shows a scan.
+
+```sql
+-- The query
+SELECT id, total, status
+FROM orders
+WHERE customer_id = @customerId
+  AND created_at >= @from
+ORDER BY created_at DESC
+LIMIT 50;
+```
+
+```sql
+-- ❌ Bad: range column first. Rows for a customer are scattered across all dates.
+CREATE INDEX ix_orders_bad ON orders (created_at, customer_id);
+-- Plan: Index Scan, ~4.1 million rows examined, 2,300 ms
+```
+
+```sql
+-- ✅ Good: equality first, then range/sort. Seek + ordered range scan.
+CREATE INDEX ix_orders_customer_created ON orders (customer_id, created_at DESC)
+    INCLUDE (total, status);   -- Covering: no table access needed
+-- Plan: Index Seek, 50 rows examined, 1.8 ms
+```
+
+**Results:**
+- **Bad**: 4.1 million rows examined, 2,300 ms, buffer pool churned.
+- **Good**: 50 rows examined, about 1.8 ms, answered entirely from the index.
+- **Improvement**: About 1,200x faster, from reordering two columns and including two more.
+
+#### Scenario 2: Over-indexing killing write throughput
+
+**Problem**: A high-volume events table accumulated 11 indexes as people added one per new query. Bulk insert throughput fell from 40,000 rows/sec to 7,000.
+
+```sql
+-- ❌ Bad: 11 single-column indexes, most of them redundant and unused
+CREATE INDEX ix1 ON events (tenant_id);
+CREATE INDEX ix2 ON events (tenant_id, event_type);
+CREATE INDEX ix3 ON events (tenant_id, event_type, created_at);
+CREATE INDEX ix4 ON events (event_type);
+CREATE INDEX ix5 ON events (created_at);
+-- ...and six more
+-- Every INSERT performs 11 B-tree modifications
+```
+
+```sql
+-- ✅ Good: keep the widest useful composite (it serves its own prefixes) and drop the rest.
+-- ix3 already covers queries on (tenant_id), (tenant_id, event_type),
+-- and (tenant_id, event_type, created_at) because a B-tree serves any leading prefix.
+DROP INDEX ix1;   -- Prefix of ix3
+DROP INDEX ix2;   -- Prefix of ix3
+DROP INDEX ix4;   -- Verify usage first; keep only if queries filter on event_type alone
+
+-- Verify before dropping (PostgreSQL):
+SELECT indexrelname, idx_scan FROM pg_stat_user_indexes WHERE relname = 'events';
+-- Any index with idx_scan = 0 after a full business cycle is a candidate for removal.
+```
+
+**Results:**
+- **Bad**: 11 index writes per insert, 7,000 rows/sec, and roughly 3 GB of index storage.
+- **Good**: 3 index writes per insert, about 28,000 rows/sec, and about 900 MB of index storage.
+- **Improvement**: 4x insert throughput and one third of the storage, with identical read plans.
+
+#### Scenario 3: Reading the plan before adding an index
+
+**Problem**: A query is slow and the instinct is to add an index. The plan shows the real cause is a key lookup, not a missing index.
+
+```sql
+-- PostgreSQL
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT id, customer_id, total, notes
+FROM orders
+WHERE status = 'pending';
+
+-- ❌ Plan before: index seek on status, then 84,000 heap fetches
+--   Index Scan using ix_orders_status  (rows=84,213)
+--   Buffers: shared hit=1204 read=83,995      <- 84k random reads
+--   Execution Time: 1,842 ms
+```
+
+```sql
+-- ✅ Fix: make the existing index cover the query so heap fetches disappear
+CREATE INDEX ix_orders_status_covering ON orders (status)
+    INCLUDE (customer_id, total, notes);
+
+-- Plan after:
+--   Index Only Scan using ix_orders_status_covering  (rows=84,213)
+--   Buffers: shared hit=1310                  <- no heap access
+--   Execution Time: 61 ms
+```
+
+**Results:**
+- **Bad**: 84,000 random page reads to fetch columns the index did not contain.
+- **Good**: All columns read sequentially from the index leaves.
+- **Improvement**: About 30x faster, achieved by widening an index rather than adding a new one.
+
+### Key takeaways
+
+- **Use for:** Every query that runs frequently or touches a large table. Design indexes from the query list, not from the schema.
+- **Rules:** Equality columns first, then range or sort columns. One well-chosen composite index beats several single-column ones, because a B-tree serves any leading prefix. Include the selected columns to make hot queries covering. Always read the actual plan (`EXPLAIN ANALYZE`, or `SET STATISTICS IO ON`) before and after.
+- **Prune regularly:** Check index usage statistics and drop indexes with zero scans. Every index is a permanent tax on writes.
+- **Typical improvements:** 100x–1,000x on a query that changes from scan to seek. 3x–5x insert throughput from removing redundant indexes.
+- **Trade-off:** Indexes cost storage, slow writes, and must be maintained. Covering indexes are wider, so fewer entries fit per page and the index consumes more buffer pool.
+- **Common mistakes:** Putting the range column first. Creating an index per query without checking that an existing prefix already serves it. Indexing low-selectivity columns like a two-value status on its own. Adding indexes without measuring the write cost. Assuming an index helps a query that is not sargable.
+- **Important:** An index only helps if the query can use it. Wrapping the indexed column in a function, or comparing it to a different type, silently disables it.
+
+---
+
+## Write Sargable Queries
+
+Sargable means "Search ARGument able": the query predicate can be evaluated by seeking into an index. A predicate becomes non-sargable when the indexed column is wrapped in a function, altered by arithmetic, compared against a different data type, or matched with a leading wildcard. When that happens the database must compute the expression for every row, which forces a full scan even when a perfect index exists. The fix is always to move the transformation to the other side of the comparison, or to index the expression itself.
+
+### Key concepts
+
+- **Sargable predicate**: A condition of the form `column <operator> constant` where the column appears bare. The optimizer can navigate the index directly to the matching range.
+- **Non-sargable predicate**: A condition where the column is inside an expression, such as `YEAR(created_at) = 2026` or `LOWER(email) = 'a@b.com'`. The value must be computed per row, so the index ordering is useless.
+- **Implicit conversion**: When the column type and the parameter type differ, the database converts one side. If it converts the column, it applies a function to every row and loses the index.
+- **Expression index**: An index built on the result of a deterministic expression, for example `CREATE INDEX ... ON users (LOWER(email))`. It makes the previously non-sargable predicate sargable.
+- **Leading wildcard**: `LIKE '%term'`. Because a B-tree is ordered by prefix, a pattern with an unknown prefix cannot be seeked. `LIKE 'term%'` can.
+- **Residual predicate**: A condition the optimizer applies after fetching rows, rather than using it to narrow the search. Non-sargable predicates always become residual.
+
+### How it works
+
+**Why a function on the column breaks the seek:**
+
+An index on `created_at` stores values in chronological order. The optimizer can find `created_at >= '2026-01-01'` by descending the tree to that boundary and reading forward, because the ordering of the stored values matches the ordering the predicate cares about.
+
+`YEAR(created_at) = 2026` asks about the ordering of a *derived* value. The index has no idea where rows with `YEAR = 2026` live, because it never stored that. The only way to answer is to read every row, compute `YEAR`, and test it.
+
+**The rewrite that fixes it:** Express the same condition as a range on the bare column. `YEAR(created_at) = 2026` becomes `created_at >= '2026-01-01' AND created_at < '2027-01-01'`. Identical semantics, but now both bounds are directly seekable.
+
+**Why implicit conversion is the sneakiest case:** In .NET, a `string` parameter defaults to `nvarchar` in SQL Server. If the column is `varchar`, the server cannot compare them directly. Type precedence promotes `varchar` to `nvarchar`, meaning the *column* is converted, once per row. The query looks perfectly sargable in the source but scans in production.
+
+### Why non-sargable predicates become a bottleneck
+
+- **Scan instead of seek**: A 20-million-row table read in full takes seconds instead of the milliseconds a seek would take, and the cost is independent of how few rows match.
+- **CPU per row**: Computing `LOWER()` or `CONVERT()` 20 million times consumes real CPU on the database server, which is usually the least scalable tier.
+- **Buffer pool eviction**: A full scan pulls the entire table through memory, evicting pages other queries need and degrading unrelated work.
+- **Invisible in code review**: `WHERE LOWER(email) = @email` looks careful and correct. Only the execution plan reveals it costs a scan.
+- **It defeats the index you already paid for**: The write cost of the index is still paid on every insert, but no read ever benefits.
+
+### Example scenarios
+
+#### Scenario 1: Date functions in the predicate
+
+**Problem**: A daily report filters by date using `CAST`. It takes 4.2 seconds on a 20-million-row table that has an index on `created_at`.
+
+```sql
+-- ❌ Bad: the column is wrapped, so the index on created_at cannot be seeked
+SELECT id, total
+FROM orders
+WHERE CAST(created_at AS DATE) = '2026-09-03';
+-- Plan: Index Scan, 20,000,000 rows examined, 4,200 ms
+```
+
+```sql
+-- ✅ Good: an equivalent half-open range on the bare column
+SELECT id, total
+FROM orders
+WHERE created_at >= '2026-09-03'
+  AND created_at <  '2026-09-04';
+-- Plan: Index Seek, 3,180 rows examined, 2 ms
+```
+
+**Results:**
+- **Bad**: 20 million rows read and converted, 4,200 ms.
+- **Good**: 3,180 rows read via a range seek, about 2 ms.
+- **Improvement**: About 2,000x faster with no schema change at all.
+
+#### Scenario 2: Case-insensitive matching
+
+**Problem**: Login lookups use `LOWER(email)` and scan the users table on every attempt.
+
+```sql
+-- ❌ Bad: function on the column disables the index on email
+SELECT id, password_hash FROM users WHERE LOWER(email) = @email;
+```
+
+```sql
+-- ✅ Option A (PostgreSQL): index the expression itself
+CREATE INDEX ix_users_email_lower ON users (LOWER(email));
+-- The original query is now sargable against this index, unchanged.
+
+-- ✅ Option B (portable and usually better): store a normalized column
+ALTER TABLE users ADD normalized_email VARCHAR(320)
+    GENERATED ALWAYS AS (LOWER(email)) STORED;
+CREATE INDEX ix_users_normalized_email ON users (normalized_email);
+
+SELECT id, password_hash FROM users WHERE normalized_email = @email;
+
+-- ✅ Option C (SQL Server): use a case-insensitive collation on the column
+-- so plain equality already matches case-insensitively and stays sargable.
+```
+
+**Results:**
+- **Bad**: Full scan of 2 million users per login attempt, about 900 ms.
+- **Good**: Index seek, about 0.3 ms.
+- **Improvement**: About 3,000x faster, and the login path stops dominating database CPU.
+
+#### Scenario 3: Implicit conversion from a .NET parameter
+
+**Problem**: A query is sargable in SQL but scans in production. The plan shows `CONVERT_IMPLICIT` on the column.
+
+```csharp
+// ❌ Bad: Dapper sends a string as nvarchar; the varchar column gets converted per row
+var user = await conn.QuerySingleOrDefaultAsync<User>(
+    "SELECT id, name FROM users WHERE email = @Email",
+    new { Email = email });          // Inferred as nvarchar(4000)
+// Plan: Index Scan with CONVERT_IMPLICIT(nvarchar, email) - 2.1 million rows
+```
+
+```csharp
+// ✅ Good: declare the parameter with the column's exact type and length
+var parameters = new DynamicParameters();
+parameters.Add("@Email", email, DbType.AnsiString, size: 320);   // varchar(320)
+
+var user = await conn.QuerySingleOrDefaultAsync<User>(
+    "SELECT id, name FROM users WHERE email = @Email",
+    parameters);
+// Plan: Index Seek - 1 row
+```
+
+**Results:**
+- **Bad**: 2.1 million rows converted and examined per lookup, about 1,100 ms.
+- **Good**: Direct seek, about 0.4 ms.
+- **Improvement**: Roughly 2,700x, fixed entirely on the client by declaring the parameter type.
+
+#### Scenario 4: Leading wildcard search
+
+**Problem**: A "contains" search uses `LIKE '%term%'` and scans a large table.
+
+```sql
+-- ❌ Bad: unknown prefix, so a B-tree cannot be seeked
+SELECT id, title FROM articles WHERE title LIKE '%performance%';
+-- Full scan of 5 million rows, ~3,800 ms
+```
+
+```sql
+-- ✅ Good: use a full-text index, which is built for this access pattern
+CREATE INDEX ix_articles_title_fts ON articles
+    USING GIN (to_tsvector('english', title));
+
+SELECT id, title
+FROM articles
+WHERE to_tsvector('english', title) @@ plainto_tsquery('english', 'performance');
+-- GIN index lookup, ~12 ms
+
+-- ✅ Alternative for short prefix search: a trigram index also supports LIKE '%x%'
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX ix_articles_title_trgm ON articles USING GIN (title gin_trgm_ops);
+```
+
+**Results:**
+- **Bad**: 5 million rows scanned with a pattern match per row, about 3,800 ms.
+- **Good**: Inverted index lookup, about 12 ms, with relevance ranking available.
+- **Improvement**: About 300x faster, using the right index type instead of forcing a B-tree.
+
+### Key takeaways
+
+- **Use for:** Every predicate in every frequently executed query. This is a review checklist item, not an optimization to apply later.
+- **Rules:** Keep the indexed column bare on one side of the operator. Convert date equality into half-open ranges. Move arithmetic to the constant side (`price > 100 / 1.2`, not `price * 1.2 > 100`). Match parameter types to column types exactly. Use full-text or trigram indexes for contains-search instead of `LIKE '%x%'`.
+- **Detect it:** Look for `CONVERT_IMPLICIT`, `Filter` on a scanned column, or a scan where you expected a seek. In PostgreSQL, `EXPLAIN ANALYZE` showing `Seq Scan` on a table with a matching index is the signal.
+- **Typical improvements:** 100x–3,000x on the affected query, because the change is categorical (scan to seek), not incremental.
+- **Trade-off:** Expression indexes and generated columns cost storage and write time, and only help the exact expression they encode. Full-text indexes are larger and update more slowly than B-trees.
+- **Common mistakes:** `YEAR()`, `DATE()`, `LOWER()`, `UPPER()`, `ISNULL()` around the column. `WHERE column + 0 = @x`. Sending `nvarchar` parameters to `varchar` columns from .NET. `OR` across different columns, which often prevents index use and is better written as a `UNION ALL` of two sargable queries.
+- **Important:** A non-sargable predicate makes the index worthless for reads while you keep paying its full cost on writes. It is the worst of both worlds.
+
+---
+
+## Use Keyset Pagination Instead of OFFSET
+
+`OFFSET n` does not skip rows cheaply. The database must produce and discard the first n rows before returning anything, so the cost of a page grows linearly with how deep into the result set it is. Page 1 is instant; page 5,000 reads 100,000 rows to return 20. Keyset pagination (also called seek pagination or cursor pagination) instead remembers the last row's sort key and asks for rows after it, which is a single index seek and costs the same for every page.
+
+### Key concepts
+
+- **OFFSET/LIMIT**: Skip n rows, then return m. The skipping is real work: rows are read, sorted if needed, and thrown away.
+- **Keyset pagination**: Filtering with `WHERE (sort_key) > (last_seen_value)` and taking the next m rows. The index seeks directly to the boundary.
+- **Cursor**: An opaque token given to the client encoding the last row's sort key. The client returns it to fetch the next page, and never sees or manipulates raw offsets.
+- **Tiebreaker column**: A unique column appended to the sort key so ordering is total. Without it, rows with equal sort values can be skipped or duplicated across pages.
+- **Row comparison**: `WHERE (created_at, id) < (@lastCreated, @lastId)` compares tuples lexicographically. Supported natively in PostgreSQL and expressible as an OR-chain elsewhere.
+- **Stable pagination**: Guaranteeing no row is skipped or repeated while the underlying data changes during traversal. Keyset gives this; OFFSET does not.
+
+### How it works
+
+**What the database does for `OFFSET 100000 LIMIT 20`:**
+
+1. Use the index (or scan) to start producing rows in sort order.
+2. Produce row 1, discard. Produce row 2, discard. Continue for 100,000 rows.
+3. Produce rows 100,001 through 100,020 and return them.
+4. Total rows touched: 100,020 to deliver 20.
+
+Each of those discarded rows may require a heap fetch if the index is not covering, so deep pages can generate 100,000 random reads.
+
+**What keyset does for the same page:**
+
+1. Descend the B-tree to the position of `(@lastCreated, @lastId)`. Three or four page reads.
+2. Read the next 20 entries sequentially.
+3. Total rows touched: about 20.
+
+The cost is identical for page 2 and page 50,000, which is the entire point.
+
+**Why the tiebreaker is mandatory:** If 40 rows share the same `created_at` and you paginate on `created_at` alone, the boundary between pages falls inside that group. Rows within the group have no defined order, so the database may return the same row twice or skip one. Adding the primary key makes the sort total and the boundary unambiguous.
+
+### Why OFFSET becomes a bottleneck
+
+- **Linear cost growth**: Page n costs O(n × page_size). Page 1,000 is a thousand times more expensive than page 1, for the same amount of returned data.
+- **Sort spilling**: If the sort cannot be satisfied by an index, deep offsets force sorting a large intermediate result, which can spill to disk.
+- **Unstable results**: If a row is inserted before your current position between two page requests, every subsequent row shifts by one and the user sees a duplicate. A deletion causes a skipped row.
+- **Timeouts on deep pages**: Crawlers, exports, and "jump to last page" links hit the expensive end of the range, and those are exactly the requests that time out and get retried.
+- **It looks fine in testing**: With 500 rows in a dev database, every page is fast. The problem only appears at production data volumes.
+
+### Example scenarios
+
+#### Scenario 1: Deep pagination in an API
+
+**Problem**: An activity feed endpoint uses OFFSET. Page 1 responds in 8 ms; page 2,000 takes 3.4 seconds and sometimes times out.
+
+```csharp
+// ❌ Bad: cost grows with page number
+public async Task<IReadOnlyList<Activity>> GetPageAsync(int page, int size, CancellationToken ct)
+{
+    const string sql = """
+        SELECT id, created_at, actor_id, verb
+        FROM activities
+        ORDER BY created_at DESC, id DESC
+        OFFSET @Offset ROWS FETCH NEXT @Size ROWS ONLY;
+        """;
+
+    return (await _conn.QueryAsync<Activity>(
+        sql, new { Offset = (page - 1) * size, Size = size })).AsList();
+}
+// Page 2000, size 20 -> the database produces and discards 39,980 rows
+```
+
+```csharp
+// ✅ Good: constant cost per page, driven by the last row seen
+public async Task<PagedResult<Activity>> GetPageAsync(
+    Cursor? cursor, int size, CancellationToken ct)
+{
+    const string sql = """
+        SELECT id, created_at, actor_id, verb
+        FROM activities
+        WHERE (@LastCreated IS NULL)
+           OR (created_at, id) < (@LastCreated, @LastId)
+        ORDER BY created_at DESC, id DESC
+        LIMIT @Size;
+        """;
+
+    var rows = (await _conn.QueryAsync<Activity>(sql, new
+    {
+        LastCreated = cursor?.CreatedAt,
+        LastId = cursor?.Id,
+        Size = size
+    })).AsList();
+
+    var next = rows.Count == size
+        ? new Cursor(rows[^1].CreatedAt, rows[^1].Id)
+        : null;
+
+    return new PagedResult<Activity>(rows, next);
+}
+```
+
+```sql
+-- The index that makes this a pure seek. Column order must match ORDER BY exactly.
+CREATE INDEX ix_activities_created_id ON activities (created_at DESC, id DESC)
+    INCLUDE (actor_id, verb);
+```
+
+**Results:**
+- **Bad**: Page 2,000 reads 39,980 rows, about 3,400 ms, and degrades further as the table grows.
+- **Good**: Every page reads about 20 rows, about 2 ms, regardless of depth.
+- **Improvement**: Roughly 1,700x on deep pages and, more importantly, constant latency instead of growing latency.
+
+#### Scenario 2: Exporting a large table
+
+**Problem**: A nightly export walks 8 million rows in pages of 1,000 using OFFSET. It takes 6 hours and the last pages dominate the runtime.
+
+```csharp
+// ❌ Bad: total work is O(n²). 8,000 pages, average offset 4 million.
+for (int page = 0; ; page++)
+{
+    var batch = await Query($"SELECT * FROM orders ORDER BY id OFFSET {page * 1000} LIMIT 1000");
+    if (batch.Count == 0) break;
+    await WriteAsync(batch);
+}
+// Total rows read: roughly 8,000 * 4,000,000 = 32 billion row-visits
+```
+
+```csharp
+// ✅ Good: total work is O(n). Each row is visited exactly once.
+long lastId = 0;
+while (true)
+{
+    var batch = await _conn.QueryAsync<Order>(
+        "SELECT * FROM orders WHERE id > @LastId ORDER BY id LIMIT 1000",
+        new { LastId = lastId });
+
+    var list = batch.AsList();
+    if (list.Count == 0) break;
+
+    await WriteAsync(list);
+    lastId = list[^1].Id;      // Advance the cursor
+}
+// Total rows read: 8 million
+```
+
+**Results:**
+- **Bad**: About 32 billion row-visits, roughly 6 hours, with the cost concentrated at the end.
+- **Good**: 8 million row-visits, about 4 minutes, with constant per-batch time.
+- **Improvement**: About 90x faster, and the runtime becomes linear and predictable.
+
+### Key takeaways
+
+- **Use for:** Infinite scroll, activity feeds, exports, batch processing, log browsing, any list where users or jobs go beyond the first few pages.
+- **Rules:** Always append a unique tiebreaker to the sort key. The index column order must match `ORDER BY` exactly, including direction. Encode the cursor as an opaque base64 token so clients cannot construct arbitrary positions. Include the sort columns in the index and cover the selected columns when possible.
+- **Typical improvements:** Deep pages go from seconds to milliseconds. Full-table walks change from O(n²) to O(n), which is often the difference between a job that finishes and one that does not.
+- **Trade-off:** You lose random access to page N and total page counts. Users can go next and previous, not "jump to page 500". For most feeds that is acceptable and matches how the UI works anyway.
+- **Common mistakes:** Omitting the tiebreaker and getting duplicated or skipped rows. Building a cursor from a non-unique column. Changing the sort order without changing the index. Exposing raw offsets in the cursor, which lets clients trigger the expensive path.
+- **Important:** If the product genuinely needs "jump to page N", keep OFFSET only for that path and cap the maximum offset, or precompute page boundaries. Do not let a single UI affordance force the expensive pattern everywhere.
+
+---
+
+## Batch Inserts and Bulk Updates
+
+Inserting rows one at a time pays a full round-trip, a statement parse, and often a transaction commit per row. At 1 ms per round-trip, 100,000 rows take at least 100 seconds no matter how fast the database is. Sending the same rows as multi-row statements, or through a dedicated bulk-copy protocol, moves the fixed cost from per-row to per-batch and typically improves throughput by 10x–100x.
+
+### Key concepts
+
+- **Round-trip per statement**: Each `INSERT` sent separately costs a network round-trip plus parse and plan lookup, regardless of row size.
+- **Multi-row VALUES**: A single `INSERT INTO t (a,b) VALUES (…),(…),(…)` statement carrying many rows. One parse, one round-trip, many rows.
+- **Bulk copy protocol**: A binary path that bypasses SQL parsing entirely. `SqlBulkCopy` in SQL Server, `COPY` (Npgsql `BeginBinaryImport`) in PostgreSQL. The fastest option by a wide margin.
+- **Implicit transaction**: Without an explicit transaction, every statement commits on its own, which forces a write-ahead log flush (an fsync) per row. This is usually the dominant cost.
+- **Group commit**: Committing many rows in one transaction so the log is flushed once instead of per row.
+- **Parameter limit**: Databases cap parameters per statement (about 2,100 in SQL Server, 65,535 in PostgreSQL). With 8 columns per row that caps a batch at roughly 262 or 8,192 rows respectively, which drives batch sizing.
+- **Set-based update**: Updating many rows with one statement joined against a values list or temp table, instead of one `UPDATE` per row.
+
+### How it works
+
+**Per-row insert, step by step:**
+
+1. Client sends `INSERT` with parameters. Round-trip: 1 ms.
+2. Server parses, looks up the plan, acquires locks.
+3. Server writes the row and its index entries.
+4. Implicit commit forces a WAL flush to durable storage: 0.5–5 ms.
+5. Server acknowledges. Round-trip back.
+6. Repeat 100,000 times. Total: 150–600 seconds, almost all of it waiting.
+
+**Batched insert, step by step:**
+
+1. Client sends one statement carrying 1,000 rows. Round-trip: 1 ms.
+2. Server parses once, plans once.
+3. Server writes 1,000 rows and their index entries.
+4. One commit, one WAL flush covering all 1,000 rows.
+5. Repeat 100 times for 100,000 rows. Total: about 2–5 seconds.
+
+**Bulk copy, step by step:**
+
+1. Client opens a binary stream and writes rows in the server's native format.
+2. No SQL parsing, no per-row parameter binding, minimal logging where the target allows it.
+3. Server appends rows in bulk, building index entries in batches.
+4. Total for 100,000 rows: often under 1 second.
+
+### Why per-row writes become a bottleneck
+
+- **Round-trip domination**: With a 1 ms round-trip, the theoretical ceiling is 1,000 rows/sec no matter how powerful the database is. Batching 1,000 rows per statement raises the ceiling to 1,000,000.
+- **fsync per row**: Each autocommit forces a durable log write. Storage that can do 5,000 fsyncs/sec caps you at 5,000 rows/sec, and the disk is nearly idle in terms of bandwidth.
+- **Parse and plan overhead**: 100,000 parses of the same statement text is real server CPU spent producing an identical plan every time.
+- **Connection occupancy**: A loop holding one pooled connection for 100 seconds removes it from the pool for every other request.
+- **Index maintenance per row**: Each row updates every index individually rather than allowing the engine to batch and sort the index modifications.
+
+### Example scenarios
+
+#### Scenario 1: Importing rows one at a time
+
+**Problem**: A nightly import of 500,000 rows takes 47 minutes and holds a connection the entire time.
+
+```csharp
+// ❌ Bad: one round-trip and one implicit commit per row
+public async Task ImportAsync(IEnumerable<Reading> readings, CancellationToken ct)
+{
+    await using var conn = new NpgsqlConnection(_connectionString);
+    await conn.OpenAsync(ct);
+
+    foreach (var r in readings)
+    {
+        await conn.ExecuteAsync(
+            "INSERT INTO readings (sensor_id, taken_at, value) VALUES (@SensorId, @TakenAt, @Value)",
+            r);                                  // 500,000 round-trips + 500,000 commits
+    }
+}
+```
+
+```csharp
+// ✅ Good: batched multi-row inserts inside explicit transactions
+public async Task ImportAsync(IReadOnlyList<Reading> readings, CancellationToken ct)
+{
+    const int batchSize = 1_000;
+
+    await using var conn = new NpgsqlConnection(_connectionString);
+    await conn.OpenAsync(ct);
+
+    for (int offset = 0; offset < readings.Count; offset += batchSize)
+    {
+        var batch = readings.Skip(offset).Take(batchSize).ToArray();
+
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // Dapper expands the enumerable into a multi-row INSERT
+        await conn.ExecuteAsync(
+            "INSERT INTO readings (sensor_id, taken_at, value) VALUES (@SensorId, @TakenAt, @Value)",
+            batch, tx);
+
+        await tx.CommitAsync(ct);                // One WAL flush per 1,000 rows
+    }
+}
+```
+
+```csharp
+// ✅ Best: binary COPY bypasses SQL parsing entirely
+public async Task ImportFastAsync(IEnumerable<Reading> readings, CancellationToken ct)
+{
+    await using var conn = new NpgsqlConnection(_connectionString);
+    await conn.OpenAsync(ct);
+
+    await using var writer = await conn.BeginBinaryImportAsync(
+        "COPY readings (sensor_id, taken_at, value) FROM STDIN (FORMAT BINARY)", ct);
+
+    foreach (var r in readings)
+    {
+        await writer.StartRowAsync(ct);
+        await writer.WriteAsync(r.SensorId, NpgsqlDbType.Integer, ct);
+        await writer.WriteAsync(r.TakenAt, NpgsqlDbType.TimestampTz, ct);
+        await writer.WriteAsync(r.Value, NpgsqlDbType.Double, ct);
+    }
+
+    await writer.CompleteAsync(ct);
+}
+```
+
+**Results:**
+- **Bad**: 500,000 round-trips and commits, about 47 minutes, roughly 180 rows/sec.
+- **Good**: 500 round-trips and commits, about 38 seconds, roughly 13,000 rows/sec.
+- **Best**: One streamed operation, about 6 seconds, roughly 83,000 rows/sec.
+- **Improvement**: 74x with batching, 470x with bulk copy.
+
+#### Scenario 2: Updating many rows individually
+
+**Problem**: A reconciliation job updates 80,000 order statuses one by one, taking 12 minutes.
+
+```csharp
+// ❌ Bad: one UPDATE per row
+foreach (var change in changes)
+{
+    await _conn.ExecuteAsync(
+        "UPDATE orders SET status = @Status, updated_at = now() WHERE id = @Id",
+        change);
+}
+```
+
+```csharp
+// ✅ Good: one set-based UPDATE joined against the values
+public async Task ApplyAsync(IReadOnlyList<StatusChange> changes, CancellationToken ct)
+{
+    const string sql = """
+        UPDATE orders o
+        SET status = c.status,
+            updated_at = now()
+        FROM (SELECT unnest(@Ids) AS id, unnest(@Statuses) AS status) AS c
+        WHERE o.id = c.id;
+        """;
+
+    await _conn.ExecuteAsync(sql, new
+    {
+        Ids = changes.Select(c => c.Id).ToArray(),
+        Statuses = changes.Select(c => c.Status).ToArray()
+    });
+}
+```
+
+```csharp
+// ✅ EF Core alternative when the new value is uniform: no entities loaded at all
+await _db.Orders
+    .Where(o => o.Status == "pending" && o.CreatedAt < cutoff)
+    .ExecuteUpdateAsync(s => s
+        .SetProperty(o => o.Status, "expired")
+        .SetProperty(o => o.UpdatedAt, DateTime.UtcNow), ct);
+```
+
+**Results:**
+- **Bad**: 80,000 round-trips and commits, about 12 minutes.
+- **Good**: 1 round-trip, one set-based update using the primary key index, about 2.5 seconds.
+- **Improvement**: About 290x, with a single transaction instead of 80,000.
+
+### Key takeaways
+
+- **Use for:** Imports, ETL, migrations, event ingestion, reconciliation jobs, seeding, any loop containing a write.
+- **Order of preference:** Bulk copy (`SqlBulkCopy`, `COPY`) for large loads, then multi-row `INSERT` batches in explicit transactions, then set-based `UPDATE ... FROM` or `ExecuteUpdate`, and per-row writes only for genuinely single-row operations.
+- **Batch sizing:** Start at 500–5,000 rows. Bound it by the parameter limit (2,100 in SQL Server, 65,535 in PostgreSQL, divided by columns per row) and by how much work you are willing to lose or redo on failure. Larger batches hold locks longer and grow the undo/WAL footprint.
+- **Typical improvements:** 10x–100x with batching, 100x–500x with bulk copy, and a comparable reduction in database CPU and log flush volume.
+- **Trade-off:** Bigger batches mean longer-held locks, larger transactions, coarser error granularity (one bad row can fail the whole batch), and more memory on both sides.
+- **Common mistakes:** Forgetting the explicit transaction, so batching removes round-trips but not the per-statement commit cost. Batches so large they exceed parameter limits or cause lock escalation. Loading entities just to update one column instead of using a set-based update. Leaving change tracking on for bulk work in EF Core.
+- **Important:** The dominant cost of per-row inserts is usually the commit, not the insert. Wrapping an existing loop in one transaction is often a 10x win before you change anything else.
+
+---
+
+## Use Caching to Avoid Repeating Expensive Work
+
+A cache stores the result of an expensive operation so subsequent requests get it without redoing the work. The value comes from the hit ratio: if 95% of requests hit an in-memory cache at 50 ns instead of a database at 8 ms, the average drops from 8 ms to 0.4 ms. Caching is the highest-leverage optimization available for read-heavy workloads, and also the easiest to get wrong, because every cache introduces staleness, memory growth, and a new failure mode when many requests miss at the same time.
+
+### Key concepts
+
+- **Cache-aside (lazy loading)**: The application checks the cache, and on a miss loads from the origin and stores the result. The most common pattern and the default choice.
+- **Hit ratio**: Fraction of lookups served from cache. Effective latency is `hit% × cache_latency + miss% × (cache_latency + origin_latency)`. A 90% ratio removes 90% of origin load, a 99% ratio removes 99%.
+- **TTL (time to live)**: How long an entry stays valid. It is a staleness budget: the maximum time a user may see out-of-date data.
+- **Absolute vs sliding expiration**: Absolute expires at a fixed time regardless of use. Sliding resets the clock on each access, so hot entries never expire, which is dangerous for data that must eventually refresh.
+- **Eviction**: Removing entries to stay within a size limit, usually by least-recently-used (LRU) or least-frequently-used (LFU) order. Distinct from expiration, which is time-based.
+- **Cache stampede (dogpile)**: When a popular entry expires and hundreds of concurrent requests all miss and all hit the origin simultaneously.
+- **L1/L2**: A two-level cache. L1 is in-process memory (nanoseconds, per-instance, not shared). L2 is distributed such as Redis (sub-millisecond, shared across instances, survives restarts).
+
+### How it works
+
+**Cache-aside on a hit:**
+
+1. Compute the key.
+2. Look up in the dictionary. On a hit, return the value. Cost: roughly 20–100 ns for in-memory, 0.2–1 ms for Redis including the network round-trip.
+
+**Cache-aside on a miss:**
+
+1. Look up, find nothing.
+2. Call the origin: a database query, an HTTP call, a computation. Cost: milliseconds to seconds.
+3. Store the result with a TTL.
+4. Return it.
+
+A miss is strictly more expensive than no cache at all, because it pays the lookup plus the origin. Caching only pays off when the hit ratio is high enough that the saved origin calls outweigh the added lookups and memory.
+
+**Why the hit ratio matters more than the cache's own speed:** Going from a 90% to a 99% hit ratio removes 90% of the remaining origin calls. Going from a 50 ns to a 20 ns cache lookup changes almost nothing, because the misses dominate the average.
+
+### Why missing or misusing a cache becomes a bottleneck
+
+- **Repeated identical work**: A configuration lookup executed on every request costs a database round-trip thousands of times per second for data that changes once a day.
+- **Unbounded growth**: A cache with no size limit and no expiration keeps every key ever requested. A per-user cache with a million users becomes a memory leak that ends in an OOM or constant gen2 collections.
+- **Stampede on expiry**: A hot key with a 60-second TTL sends every concurrent request to the origin at second 60. At 2,000 requests/sec that is 2,000 simultaneous identical queries.
+- **Synchronized expiry**: Warming 10,000 entries at startup with an identical TTL makes them all expire in the same second, producing a periodic origin spike.
+- **Stale writes**: Caching without an invalidation path means a user updates their profile and keeps seeing the old value until the TTL elapses.
+
+### Example scenarios
+
+#### Scenario 1: Cache-aside with a size bound
+
+**Problem**: A product endpoint queries the database on every request. At 3,000 requests/sec the database is at 80% CPU serving identical queries for a catalog that changes hourly.
+
+```csharp
+// ❌ Bad: origin hit on every request
+public async Task<Product?> GetAsync(int id, CancellationToken ct)
+{
+    return await _db.Products.AsNoTracking()
+        .FirstOrDefaultAsync(p => p.Id == id, ct);      // 8 ms every time
+}
+```
+
+```csharp
+// ✅ Good: cache-aside with a bounded, expiring cache
+public sealed class ProductCache
+{
+    private readonly IMemoryCache _cache;
+    private readonly AppDbContext _db;
+
+    public ProductCache(IMemoryCache cache, AppDbContext db)
+    {
+        _cache = cache;
+        _db = db;
+    }
+
+    public async Task<Product?> GetAsync(int id, CancellationToken ct)
+    {
+        return await _cache.GetOrCreateAsync($"product:{id}", async entry =>
+        {
+            // Jitter prevents thousands of entries expiring in the same second
+            var jitter = TimeSpan.FromSeconds(Random.Shared.Next(0, 60));
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5) + jitter;
+            entry.Size = 1;                              // Counts against SizeLimit
+
+            return await _db.Products.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == id, ct);
+        });
+    }
+}
+
+// Registration: a hard bound so the cache can never grow without limit
+services.AddMemoryCache(options =>
+{
+    options.SizeLimit = 50_000;          // Max 50,000 entries
+    options.CompactionPercentage = 0.25; // Evict 25% when the limit is reached
+});
+```
+
+**Results:**
+- **Bad**: 3,000 queries/sec, database at 80% CPU, 8 ms per request.
+- **Good**: About 97% hit ratio, so roughly 90 queries/sec reach the database. Database CPU drops to about 8%, and average latency falls to roughly 0.3 ms.
+- **Improvement**: About 25x lower latency and 97% less database load, with memory bounded at 50,000 entries.
+
+#### Scenario 2: Preventing a stampede on a hot key
+
+**Problem**: The homepage feed is cached for 60 seconds. Every minute, latency spikes to 4 seconds and the database briefly saturates, because 1,800 concurrent requests all miss at once.
+
+```csharp
+// ❌ Bad: every concurrent miss calls the origin
+public async Task<Feed> GetFeedAsync(CancellationToken ct)
+{
+    if (_cache.TryGetValue("feed:home", out Feed? cached))
+        return cached!;
+
+    var feed = await _repo.BuildFeedAsync(ct);          // 1,800 concurrent calls at expiry
+    _cache.Set("feed:home", feed, TimeSpan.FromSeconds(60));
+    return feed;
+}
+```
+
+```csharp
+// ✅ Good: coalesce concurrent misses so only one request touches the origin
+public sealed class FeedCache
+{
+    private readonly IMemoryCache _cache;
+    private readonly IFeedRepository _repo;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
+
+    public async Task<Feed> GetFeedAsync(CancellationToken ct)
+    {
+        const string key = "feed:home";
+
+        if (_cache.TryGetValue(key, out Feed? cached))
+            return cached!;
+
+        // One in-flight rebuild per key; everyone else waits for it
+        var gate = _locks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            // Re-check: another thread may have populated it while we waited
+            if (_cache.TryGetValue(key, out cached))
+                return cached!;
+
+            var feed = await _repo.BuildFeedAsync(ct);
+
+            _cache.Set(key, feed, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60),
+                Size = 1
+            });
+
+            return feed;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+}
+```
+
+```csharp
+// ✅ Better: serve the stale value while one background task refreshes it.
+// No request ever waits for the origin after the first population.
+public async Task<Feed> GetFeedStaleWhileRevalidateAsync(CancellationToken ct)
+{
+    const string key = "feed:home";
+
+    if (_cache.TryGetValue(key, out CacheEntry<Feed>? entry))
+    {
+        if (entry!.IsStale && entry.TryBeginRefresh())
+        {
+            // Fire and forget: the current request returns immediately with stale data
+            _ = Task.Run(async () =>
+            {
+                var fresh = await _repo.BuildFeedAsync(CancellationToken.None);
+                _cache.Set(key, new CacheEntry<Feed>(fresh, DateTime.UtcNow));
+            });
+        }
+
+        return entry.Value;                             // Never blocks
+    }
+
+    return await GetFeedAsync(ct);                      // Cold start only
+}
+```
+
+**Results:**
+- **Bad**: 1,800 simultaneous origin calls every 60 seconds. Latency spikes to 4,000 ms.
+- **Good (coalescing)**: 1 origin call per expiry. 1,799 requests wait about 300 ms for it.
+- **Better (stale-while-revalidate)**: 1 background origin call. Zero requests wait. Latency stays flat at about 0.3 ms.
+- **Improvement**: The periodic latency spike disappears entirely and origin load drops by a factor of 1,800.
+
+#### Scenario 3: Two-level cache with correct invalidation
+
+**Problem**: Six service instances each keep their own in-memory cache. When a user updates their profile, five instances keep serving the old value for up to five minutes.
+
+```csharp
+// ❌ Bad: per-instance cache with no cross-instance invalidation
+_cache.Set($"user:{id}", user, TimeSpan.FromMinutes(5));
+// Instance A updates and evicts its own copy. Instances B..F keep the stale value.
+```
+
+```csharp
+// ✅ Good: L1 in-memory + L2 Redis, with pub/sub invalidation across instances
+public sealed class UserCache : IAsyncDisposable
+{
+    private readonly IMemoryCache _l1;
+    private readonly IDatabase _redis;
+    private readonly ISubscriber _bus;
+    private const string InvalidationChannel = "cache:invalidate:user";
+
+    public UserCache(IMemoryCache l1, IConnectionMultiplexer redis)
+    {
+        _l1 = l1;
+        _redis = redis.GetDatabase();
+        _bus = redis.GetSubscriber();
+
+        // Every instance drops its L1 copy when any instance publishes an invalidation
+        _bus.Subscribe(InvalidationChannel, (_, message) =>
+            _l1.Remove($"user:{message}"));
+    }
+
+    public async Task<User?> GetAsync(int id, CancellationToken ct)
+    {
+        var key = $"user:{id}";
+
+        // L1: in-process, ~50 ns
+        if (_l1.TryGetValue(key, out User? user))
+            return user;
+
+        // L2: Redis, ~0.4 ms, shared across all instances
+        var payload = await _redis.StringGetAsync(key);
+        if (payload.HasValue)
+        {
+            user = JsonSerializer.Deserialize<User>(payload!);
+            _l1.Set(key, user, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30),  // Short L1 TTL
+                Size = 1
+            });
+            return user;
+        }
+
+        // Origin: ~8 ms
+        user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == id, ct);
+        if (user is null) return null;
+
+        await _redis.StringSetAsync(key, JsonSerializer.Serialize(user), TimeSpan.FromMinutes(10));
+        _l1.Set(key, user, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30),
+            Size = 1
+        });
+
+        return user;
+    }
+
+    public async Task InvalidateAsync(int id)
+    {
+        var key = $"user:{id}";
+        await _redis.KeyDeleteAsync(key);                    // Clear L2
+        _l1.Remove(key);                                     // Clear local L1
+        await _bus.PublishAsync(InvalidationChannel, id);    // Tell every other instance
+    }
+
+    public async ValueTask DisposeAsync() => await _bus.UnsubscribeAllAsync();
+}
+```
+
+**Results:**
+- **Bad**: Up to 5 minutes of stale reads on 5 of 6 instances after every write.
+- **Good**: About 92% of reads served from L1 at 50 ns, about 7% from Redis at 0.4 ms, about 1% from the database. Invalidation propagates to all instances in a few milliseconds.
+- **Improvement**: Near-memory read latency with cross-instance correctness, and origin load reduced by roughly 99%.
+
+### Key takeaways
+
+- **Use for:** Read-heavy data that tolerates some staleness: configuration, catalogs, reference data, computed aggregates, rendered fragments, authorization decisions, expensive external API responses.
+- **Avoid for:** Data that must be strictly current (account balances at the moment of a transfer), data with a near-zero hit ratio, per-request objects, and anything where a stale read causes a correctness bug rather than a cosmetic one.
+- **Rules:** Always set a size limit and an absolute expiration. Add jitter to TTLs. Invalidate explicitly on write instead of relying only on the TTL. Coalesce concurrent misses on hot keys. Prefer short L1 TTLs plus a shared L2 over long per-instance TTLs.
+- **Typical improvements:** 10x–100x lower read latency and 90%–99% less origin load, directly proportional to the hit ratio.
+- **Trade-off:** Staleness, memory consumption, an extra failure mode, and invalidation complexity. A cache also hides origin regressions until the hit ratio drops.
+- **Common mistakes:** No size limit. Sliding expiration on data that must eventually refresh. Ignoring stampedes. Caching per-user data with unbounded cardinality. Assuming Redis is fast enough to skip L1 (a round-trip is still 10,000 times slower than a dictionary lookup). Not emitting a hit-ratio metric, so you cannot tell whether the cache works.
+- **Important:** Measure the hit ratio and origin call rate. A cache with a 40% hit ratio is often slower than no cache and always more complex.
+
+---
+
+## Choose Data Structures Based on Access Patterns
+
+The cost of an operation depends far more on the data structure than on the code around it. A membership test is O(1) in a `HashSet` and O(n) in a `List`, so the same loop that takes 3 milliseconds with one takes 4 seconds with the other. Big O tells you how cost grows, but cache locality decides the constant factor, which is why an array often beats a theoretically superior structure at realistic sizes. Choose from the operations you actually perform, not from what feels natural to write.
+
+### Key concepts
+
+- **Amortized cost**: The average cost per operation over a sequence. `List<T>.Add` is O(1) amortized because occasional doublings are spread across many cheap appends.
+- **Cache locality**: Whether the next element you need is already in the cache line you just loaded. An array of 16 `int` values fits one 64-byte cache line; a linked list of 16 nodes touches 16 scattered lines.
+- **Pointer chasing**: Following a reference to an unpredictable heap address. The CPU cannot prefetch it, so each hop costs a full memory access of 100–300 cycles.
+- **Hash table**: Buckets indexed by a hash of the key. Lookup is O(1) on average, degrading to O(n) if hashes collide heavily.
+- **Sorted structure**: `SortedDictionary` (a tree, O(log n)) and `SortedList` (a sorted array, O(log n) search but O(n) insert). Choose based on whether you insert often or mostly search.
+- **Priority queue**: A binary heap. O(log n) insert and remove-minimum, O(1) peek. The right structure for schedulers and top-K problems.
+
+### How it works
+
+**Why an array beats a linked list even where Big O says otherwise:**
+
+Summing 1 million `int` values from `int[]`: each 64-byte cache line holds 16 values, so 62,500 memory loads cover the whole array, and the hardware prefetcher predicts the sequential pattern and loads ahead. Total time is roughly 0.4 ms.
+
+Summing 1 million values from `LinkedList<int>`: each node is a separate heap object holding a value and two references. Every `Next` is a dependent load the prefetcher cannot anticipate, so each element costs a potential cache miss. Total time is roughly 12 ms, about 30x slower for the same asymptotic complexity.
+
+**When each structure is the right answer:**
+
+- Sequential iteration, index access, small fixed size: `T[]` or `Span<T>`.
+- Growing sequence with index access: `List<T>`.
+- Membership tests and deduplication: `HashSet<T>`.
+- Key to value lookup: `Dictionary<TKey,TValue>`.
+- Range queries and ordered iteration: `SortedDictionary` or a sorted array with `BinarySearch`.
+- FIFO and LIFO: `Queue<T>` and `Stack<T>`, both array-backed.
+- Always-take-the-smallest: `PriorityQueue<TElement,TPriority>`.
+- Insert or remove in the middle constantly, with references held to nodes: `LinkedList<T>`, which is the rare case where it wins.
+
+### Why the wrong structure becomes a bottleneck
+
+- **Linear membership tests**: `list.Contains(x)` inside a loop over m items is O(n×m). With 10,000 and 10,000 that is 100 million comparisons instead of 10,000 hash lookups.
+- **Repeated sorting**: Calling `OrderBy` inside a loop sorts the same data every iteration, turning O(n log n) into O(n² log n).
+- **Insert at the front of a list**: `List<T>.Insert(0, x)` shifts every element. Doing it n times is O(n²). A `Queue<T>` or reversed append makes it O(n).
+- **Pointer-heavy graphs**: A tree of small class nodes spends most of its time waiting on memory rather than computing.
+- **Wrong structure hidden behind LINQ**: `.Contains`, `.Any`, `.First` on an `IEnumerable` may be a full scan even when the underlying collection could answer in O(1).
+
+### Example scenarios
+
+#### Scenario 1: Membership testing
+
+**Problem**: Filtering 50,000 records against a blocklist of 20,000 IDs takes 6 seconds.
+
+```csharp
+// ❌ Bad: Contains on a List is a linear scan. 50,000 × 20,000 = 1 billion comparisons.
+var blocked = await LoadBlockedIdsAsync();      // List<long>, 20,000 entries
+
+var allowed = records.Where(r => !blocked.Contains(r.Id)).ToList();
+```
+
+```csharp
+// ✅ Good: build the set once, then each test is a single hash lookup
+var blockedIds = new HashSet<long>(await LoadBlockedIdsAsync());   // O(n) to build
+
+var allowed = new List<Record>(records.Count);
+foreach (var r in records)
+{
+    if (!blockedIds.Contains(r.Id))             // O(1)
+        allowed.Add(r);
+}
+```
+
+**Results:**
+- **Bad**: 1 billion comparisons, about 6,000 ms.
+- **Good**: 20,000 inserts plus 50,000 O(1) lookups, about 4 ms.
+- **Improvement**: About 1,500x faster.
+
+#### Scenario 2: Top-K without sorting everything
+
+**Problem**: Finding the 10 highest-scoring items out of 5 million sorts the entire collection.
+
+```csharp
+// ❌ Bad: sorts all 5 million to return 10. O(n log n) with a large constant.
+var top10 = items.OrderByDescending(i => i.Score).Take(10).ToList();
+```
+
+```csharp
+// ✅ Good: a bounded min-heap keeps only 10 candidates. O(n log k).
+public static List<Item> TopK(IEnumerable<Item> items, int k)
+{
+    var heap = new PriorityQueue<Item, double>(k);   // Min-heap of the best k so far
+
+    foreach (var item in items)
+    {
+        if (heap.Count < k)
+        {
+            heap.Enqueue(item, item.Score);
+        }
+        else if (item.Score > heap.Peek().Score)
+        {
+            heap.DequeueEnqueue(item, item.Score);   // Replace the weakest in one step
+        }
+    }
+
+    var result = new List<Item>(heap.Count);
+    while (heap.TryDequeue(out var it, out _))
+        result.Add(it);
+
+    result.Reverse();                                 // Highest first
+    return result;
+}
+```
+
+**Results:**
+- **Bad**: About 5 million × log₂(5,000,000) ≈ 115 million comparisons plus a 5-million-element allocation, roughly 2,800 ms.
+- **Good**: About 5 million × log₂(10) ≈ 17 million comparisons and a 10-element heap, roughly 95 ms.
+- **Improvement**: About 30x faster with a constant memory footprint.
+
+#### Scenario 3: Grouping and counting
+
+**Problem**: Counting occurrences by key uses a list of tuples and a linear search per item.
+
+```csharp
+// ❌ Bad: O(n) search per increment, so O(n²) overall
+var counts = new List<(string Key, int Count)>();
+
+foreach (var e in events)
+{
+    int idx = counts.FindIndex(c => c.Key == e.Key);      // Linear scan
+    if (idx >= 0) counts[idx] = (e.Key, counts[idx].Count + 1);
+    else counts.Add((e.Key, 1));
+}
+```
+
+```csharp
+// ✅ Good: dictionary with a ref lookup, one hash per event and no double lookup
+var counts = new Dictionary<string, int>(capacity: 1024, StringComparer.Ordinal);
+
+foreach (var e in events)
+{
+    // CollectionsMarshal gives a ref to the slot: one hash instead of two
+    ref int count = ref CollectionsMarshal.GetValueRefOrAddDefault(counts, e.Key, out _);
+    count++;
+}
+```
+
+**Results:**
+- **Bad**: With 1 million events over 50,000 distinct keys, about 25 billion comparisons. Effectively never finishes.
+- **Good**: 1 million hash computations and increments, about 45 ms.
+- **Improvement**: From unusable to instant.
+
+### Key takeaways
+
+- **Use for:** Every collection in a hot path. The choice is made once and pays or costs forever after.
+- **Rules:** Membership goes in a `HashSet`. Key lookup goes in a `Dictionary`. Sequential iteration goes in an array or `List`. Top-K goes in a `PriorityQueue`. Prefer array-backed structures unless you specifically need mid-sequence insertion with held references.
+- **Typical improvements:** 100x–1,500x when replacing a linear scan with a hash lookup. 10x–30x when replacing a linked list with an array for iteration.
+- **Trade-off:** Hash structures use more memory per element and give no ordering. Sorted structures cost O(log n) instead of O(1). Arrays cost O(n) for mid-sequence insertion.
+- **Common mistakes:** `List.Contains` in a loop. `OrderBy` inside a loop. `Insert(0, …)` repeatedly. Using `LinkedList` because insertion is "O(1)" while iterating it constantly. Using `IEnumerable<T>` as a field type and losing the ability to use the concrete structure's fast paths.
+- **Important:** Fix the data structure before micro-optimizing the loop. The structure usually changes the exponent, while the loop only changes the constant.
+
+---
+
+## Pre-Size Collections to Avoid Repeated Reallocation
+
+`List<T>`, `Dictionary<K,V>`, `HashSet<T>`, and `StringBuilder` all start small and grow by doubling. Each growth allocates a new backing array and copies every existing element into it. Filling a list with a million items without a capacity performs about 20 reallocations and copies roughly 2 million elements in total, all of which becomes immediate garbage. Passing the expected size to the constructor removes every one of those copies for the cost of one parameter.
+
+### Key concepts
+
+- **Capacity vs Count**: `Count` is how many elements are stored. `Capacity` is how many fit before the backing array must be replaced.
+- **Growth factor**: .NET collections double capacity when full. Starting from 4, the sequence is 4, 8, 16, 32, and so on, so filling n elements causes about log₂(n) reallocations.
+- **Total copy cost**: Because each doubling copies everything, total elements copied while growing to n is approximately 2n. That work is pure overhead.
+- **Rehashing**: When a `Dictionary` or `HashSet` grows, every key must be re-hashed and re-bucketed, which is far more expensive than a simple array copy.
+- **Large Object Heap**: Any array over 85,000 bytes is allocated on the LOH, which is not compacted by default. A `List<long>` growing past about 10,600 elements starts producing LOH garbage on every doubling.
+- **`EnsureCapacity`**: Grows the backing store once to at least the requested size, usable when the collection already exists.
+
+### How it works
+
+**Filling a `List<int>` with 1,000,000 items with no capacity:**
+
+1. Capacity 4 fills, allocate 8, copy 4.
+2. Capacity 8 fills, allocate 16, copy 8.
+3. Continues doubling. The last step allocates 1,048,576 and copies 524,288 elements.
+4. Total: 18 reallocations, about 1,048,572 elements copied, and 18 dead arrays. The largest few land on the LOH.
+
+**With `new List<int>(1_000_000)`:**
+
+1. One allocation of exactly the right size.
+2. Zero copies, zero intermediate garbage.
+
+**Why dictionaries are worse:** Growing a `Dictionary` does not just copy, it recomputes the hash of every key and redistributes entries into new buckets. For string keys, that means re-hashing every string. Growing to a million entries re-hashes roughly a million keys spread across the doublings.
+
+### Why unsized collections become a bottleneck
+
+- **Wasted copying**: About 2n element copies for a collection of size n, on top of the n writes you actually wanted.
+- **Garbage generation**: Each intermediate array becomes garbage immediately. Building a 1-million-element list produces roughly 8 MB of dead arrays.
+- **LOH fragmentation**: Large intermediate arrays go to the LOH, which is not compacted, so repeated large builds fragment the heap over time.
+- **Rehashing cost**: For hash-based collections the growth cost includes recomputing every hash, which for string keys is proportional to key length.
+- **Latency spikes**: A single doubling at a large size is a multi-megabyte allocation and copy in the middle of a request, appearing as an unexplained P99 outlier.
+
+### Example scenarios
+
+#### Scenario 1: Building a result list of known size
+
+**Problem**: A projection method builds a list from a query result of known count. Profiling shows large arrays being allocated and immediately discarded.
+
+```csharp
+// ❌ Bad: 18 reallocations and ~1M element copies for a 1M-element result
+public List<Dto> Project(Entity[] source)
+{
+    var result = new List<Dto>();                 // Capacity 0
+    foreach (var e in source)
+        result.Add(Map(e));
+    return result;
+}
+```
+
+```csharp
+// ✅ Good: exact capacity known up front, zero reallocations
+public List<Dto> Project(Entity[] source)
+{
+    var result = new List<Dto>(source.Length);    // One allocation, right size
+    foreach (var e in source)
+        result.Add(Map(e));
+    return result;
+}
+
+// ✅ Better when the size is exact and the result is read-only: skip List entirely
+public Dto[] ProjectToArray(Entity[] source)
+{
+    var result = new Dto[source.Length];
+    for (int i = 0; i < source.Length; i++)
+        result[i] = Map(source[i]);
+    return result;
+}
+```
+
+**Results:**
+- **Bad**: 18 allocations totaling about 16 MB, roughly 1 million wasted copies, several LOH allocations.
+- **Good**: 1 allocation of 8 MB, zero copies.
+- **Improvement**: About 50% faster for the fill and roughly 8 MB less garbage per call.
+
+#### Scenario 2: Dictionary rehashing during a bulk load
+
+**Problem**: Loading 500,000 records into a lookup dictionary takes 380 ms, most of it in `Resize`.
+
+```csharp
+// ❌ Bad: ~19 resizes, each re-hashing every key inserted so far
+var index = new Dictionary<string, Record>();
+foreach (var r in records)
+    index[r.Key] = r;
+```
+
+```csharp
+// ✅ Good: allocate the buckets once and pick the right comparer
+var index = new Dictionary<string, Record>(
+    capacity: records.Count,
+    comparer: StringComparer.Ordinal);      // Ordinal hashing is faster than culture-aware
+
+foreach (var r in records)
+    index[r.Key] = r;
+```
+
+**Results:**
+- **Bad**: About 19 resizes, roughly 1 million cumulative key re-hashes, 380 ms.
+- **Good**: One bucket allocation, 500,000 hashes total, about 95 ms.
+- **Improvement**: About 4x faster load with substantially less garbage.
+
+#### Scenario 3: StringBuilder growth in a serializer
+
+**Problem**: Generating a 2 MB report allocates a chain of ever-larger chunks.
+
+```csharp
+// ❌ Bad: default capacity 16, grows repeatedly while producing 2 MB of text
+var sb = new StringBuilder();
+foreach (var row in rows)
+    sb.AppendLine(Format(row));
+return sb.ToString();
+```
+
+```csharp
+// ✅ Good: estimate the final size so the builder rarely grows
+// Roughly 80 characters per row, plus headroom
+var sb = new StringBuilder(capacity: rows.Count * 80);
+foreach (var row in rows)
+    sb.AppendLine(Format(row));
+return sb.ToString();
+```
+
+**Results:**
+- **Bad**: Many chunk allocations plus a final 4 MB string allocation, with the intermediate chunks becoming garbage.
+- **Good**: One chunk plus the final string.
+- **Improvement**: About 30% faster and roughly half the transient memory.
+
+### Key takeaways
+
+- **Use for:** Every collection whose approximate final size is known or estimable, especially in hot paths and bulk loads.
+- **Rules:** Pass capacity to the constructor when you know the size. Use `EnsureCapacity` when the collection already exists. Prefer an array over a `List` when the size is exact and fixed. Choose the fastest correct comparer for hash collections.
+- **Typical improvements:** 30%–50% faster fills for lists, 3x–4x for dictionaries with string keys, and roughly 50% less transient garbage.
+- **Trade-off:** Over-estimating capacity wastes memory that is never reclaimed until the collection is released, and a large over-estimate can push an allocation onto the LOH unnecessarily.
+- **Common mistakes:** Building a list from a source whose `Count` is already known and not passing it. Forgetting that a `Dictionary` rehashes on growth, not just copies. Estimating `StringBuilder` capacity in bytes rather than characters. Pre-sizing to a wildly pessimistic maximum.
+- **Important:** `source.Count` is free for arrays, lists, and any `ICollection`. If you already have it, there is no reason not to use it.
+
+---
+
+## Retry with Exponential Backoff and Jitter
+
+A retry is the correct response to a transient failure and the wrong response to an overloaded dependency. Retrying immediately, or on a fixed interval, multiplies load exactly when the dependency can least afford it, turning a brief degradation into a sustained outage. Exponential backoff spreads retries out over time, and jitter spreads them across clients so they do not resynchronize into waves. Together with a retry budget and an idempotency guarantee, they make retries safe.
+
+### Key concepts
+
+- **Transient failure**: A failure likely to succeed on a later attempt: a connection reset, a timeout, HTTP 429, HTTP 503, a deadlock victim. Distinguished from permanent failures such as 400, 401, or 404, which will fail identically on every retry.
+- **Exponential backoff**: Waiting `base × 2^attempt` between attempts, so delays grow 200 ms, 400 ms, 800 ms, 1,600 ms. This gives the dependency progressively more room to recover.
+- **Jitter**: Randomizing the delay so that clients that failed at the same instant do not retry at the same instant. Full jitter picks uniformly from `[0, computed_delay]`.
+- **Retry storm**: Every client retrying simultaneously, multiplying offered load by the retry count. With 3 retries, a struggling service suddenly receives 4x its normal traffic.
+- **Retry budget**: A cap on retries as a fraction of total requests, typically 10%. When exceeded, retries are suppressed so the system degrades instead of amplifying.
+- **Idempotency**: An operation that produces the same result whether applied once or several times. Required for any retry, because you cannot distinguish "the request never arrived" from "the response was lost".
+
+### How it works
+
+**Why immediate retry makes things worse, step by step:**
+
+1. A dependency slows down, and requests start timing out at 1 second.
+2. 1,000 clients each retry 3 times immediately.
+3. Offered load becomes 4,000 requests/sec against a service already unable to handle 1,000.
+4. Queues grow, so latency rises further, so more requests time out, so more retries fire.
+5. The system reaches a stable failure state where nothing succeeds. Recovery requires removing load, not adding capacity.
+
+**Why backoff with jitter breaks the cycle:**
+
+1. Attempt 1 fails at t=0.
+2. Retry 1 is scheduled at a random point in [0, 200] ms. Clients spread out immediately.
+3. Retry 2 is scheduled in [0, 400] ms, retry 3 in [0, 800] ms.
+4. Offered load during recovery is spread over roughly 1.4 seconds instead of concentrated in one instant.
+5. Peak load stays close to the normal rate, so the dependency drains its queue and recovers.
+
+**Why jitter matters as much as backoff:** Pure exponential backoff without jitter keeps clients synchronized. If 1,000 clients all fail at t=0, they all retry at exactly 200 ms, then all at 600 ms. The load is still spiky, just at different moments. Jitter is what actually flattens it.
+
+### Why naive retries become a bottleneck
+
+- **Load amplification**: N retries multiply offered load by N+1 precisely during an incident.
+- **Synchronized waves**: Fixed delays cause thundering herds at each retry boundary.
+- **Resource occupancy**: Each in-flight retry holds a connection, a thread-pool continuation, and memory for the duration of its timeout.
+- **Latency amplification**: A request retried 3 times with 1-second timeouts takes 4+ seconds to fail, so the caller's own timeout expires and it retries too. Retries compound across layers.
+- **Duplicate side effects**: Retrying a non-idempotent POST after a lost response creates duplicate orders, duplicate charges, or duplicate emails.
+
+### Example scenarios
+
+#### Scenario 1: Immediate retry amplifying an outage
+
+**Problem**: A payment client retries 3 times with no delay. During a 20-second downstream degradation, the dependency receives 4x load and stays down for 6 minutes.
+
+```csharp
+// ❌ Bad: immediate retries, retries everything, no cap
+public async Task<Result> ChargeAsync(Payment p, CancellationToken ct)
+{
+    for (int attempt = 0; attempt < 4; attempt++)
+    {
+        try
+        {
+            return await _client.ChargeAsync(p, ct);
+        }
+        catch (Exception)                    // Retries 400s and 401s too
+        {
+            // No delay: hammers the dependency as fast as the network allows
+        }
+    }
+    throw new PaymentFailedException();
+}
+```
+
+```csharp
+// ✅ Good: only transient failures, exponential backoff, full jitter, bounded attempts
+public sealed class PaymentClient
+{
+    private readonly ResiliencePipeline<HttpResponseMessage> _pipeline;
+
+    public PaymentClient()
+    {
+        _pipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+            .AddRetry(new RetryStrategyOptions<HttpResponseMessage>
+            {
+                MaxRetryAttempts = 3,
+                BackoffType = DelayBackoffType.Exponential,
+                Delay = TimeSpan.FromMilliseconds(200),   // 200, 400, 800 before jitter
+                UseJitter = true,                          // Spreads clients apart
+                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                    .Handle<HttpRequestException>()
+                    .Handle<TimeoutRejectedException>()
+                    .HandleResult(r => r.StatusCode is HttpStatusCode.TooManyRequests
+                                                     or HttpStatusCode.ServiceUnavailable
+                                                     or HttpStatusCode.GatewayTimeout),
+                DelayGenerator = args =>
+                {
+                    // Honor Retry-After when the server tells us how long to wait
+                    if (args.Outcome.Result?.Headers.RetryAfter?.Delta is { } retryAfter)
+                        return ValueTask.FromResult<TimeSpan?>(retryAfter);
+
+                    return ValueTask.FromResult<TimeSpan?>(null);   // Use the default policy
+                }
+            })
+            .Build();
+    }
+
+    public Task<HttpResponseMessage> ChargeAsync(Payment p, CancellationToken ct) =>
+        _pipeline.ExecuteAsync(
+            async token => await _http.PostAsJsonAsync("/charges", p, token), ct)
+            .AsTask();
+}
+```
+
+**Results:**
+- **Bad**: 4x offered load during degradation. The dependency stays down for about 6 minutes and only recovers when traffic is manually shed.
+- **Good**: Retries spread across roughly 1.4 seconds with jitter. Peak load stays near 1.3x. The dependency recovers in about 25 seconds on its own.
+- **Improvement**: Outage duration drops from 6 minutes to under 30 seconds, and 400-class errors stop being retried at all.
+
+#### Scenario 2: Making retries safe for writes
+
+**Problem**: A network timeout on order creation causes a retry, and the customer is charged twice because the first request actually succeeded.
+
+```csharp
+// ❌ Bad: retrying a non-idempotent POST creates duplicates
+await _pipeline.ExecuteAsync(ct => _http.PostAsJsonAsync("/orders", order, ct));
+// If the response is lost after the server committed, the retry creates a second order
+```
+
+```csharp
+// ✅ Good: idempotency key so the server can deduplicate retries
+public async Task<Order> CreateOrderAsync(OrderRequest request, CancellationToken ct)
+{
+    // Stable per logical operation: the SAME key is reused across every retry
+    var idempotencyKey = request.ClientRequestId;    // A GUID chosen by the caller
+
+    return await _pipeline.ExecuteAsync(async token =>
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, "/orders")
+        {
+            Content = JsonContent.Create(request)
+        };
+        message.Headers.Add("Idempotency-Key", idempotencyKey.ToString());
+
+        var response = await _http.SendAsync(message, token);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<Order>(cancellationToken: token);
+    }, ct);
+}
+```
+
+```csharp
+// Server side: store the key with the result, return the stored result on repeat
+[HttpPost("orders")]
+public async Task<IActionResult> Create(
+    [FromHeader(Name = "Idempotency-Key")] Guid key,
+    OrderRequest request,
+    CancellationToken ct)
+{
+    // Atomic insert-if-absent. If the key already exists, we have seen this request.
+    var existing = await _idempotency.TryGetAsync(key, ct);
+    if (existing is not null)
+        return Ok(existing.Response);           // Same result, no second order
+
+    var order = await _orders.CreateAsync(request, ct);
+    await _idempotency.StoreAsync(key, order, TimeSpan.FromHours(24), ct);
+
+    return Ok(order);
+}
+```
+
+**Results:**
+- **Bad**: Roughly 0.3% of orders duplicated during network instability, each requiring manual refund.
+- **Good**: Retries return the original result. Zero duplicates.
+- **Improvement**: Retries become safe for writes, which is what makes the whole retry strategy usable at all.
+
+### Key takeaways
+
+- **Use for:** Any call across a network boundary: HTTP, gRPC, database, message broker, object storage.
+- **Rules:** Retry only transient failures. Always use exponential backoff with jitter. Cap total attempts (3 is usually right). Honor `Retry-After`. Require an idempotency key for any retried write. Keep a retry budget so retries can never exceed roughly 10% of traffic. Make the total retry window shorter than the caller's timeout.
+- **Typical improvements:** Converts a self-sustaining outage into a short degradation. Recovery time commonly drops from minutes to seconds, and peak amplification from 4x to about 1.3x.
+- **Trade-off:** Retries increase tail latency for the requests that fail, consume resources while waiting, and demand idempotency work on the server.
+- **Common mistakes:** Retrying without delay. Backoff without jitter. Retrying 4xx errors. Retrying at every layer so 3 retries at 3 layers becomes 27 attempts. Generating a new idempotency key per attempt, which defeats deduplication entirely. No cap on total retry duration.
+- **Important:** Pair retries with a circuit breaker. Retries handle brief blips; a breaker handles sustained failure. Retrying against a dependency that is fully down is pure waste and pure amplification.
+
+---
+
+## Use Circuit Breakers to Fail Fast
+
+When a dependency is down, every call to it costs a full timeout before failing. At a 5-second timeout and 500 requests/sec, 2,500 requests are simultaneously blocked, each holding a connection and a continuation, and none of them will succeed. A circuit breaker watches the failure rate and, once it crosses a threshold, stops attempting calls entirely and fails immediately. This frees resources instantly, lets the failing dependency recover without load, and converts a slow cascading failure into a fast, contained one.
+
+### Key concepts
+
+- **Closed**: Normal state. Calls pass through and outcomes are recorded.
+- **Open**: Failure state. Calls are rejected immediately without touching the dependency. No timeout is paid.
+- **Half-open**: Probing state. After the break duration, a small number of trial calls are allowed. Success closes the circuit; failure reopens it.
+- **Failure ratio**: The fraction of calls that must fail within the sampling window to trip the breaker, typically 0.5.
+- **Minimum throughput**: The minimum number of calls required in the window before the ratio is meaningful. Without it, 1 failure out of 1 call would trip the breaker at 100%.
+- **Sampling duration**: The rolling window over which the ratio is computed, typically 10–30 seconds.
+- **Fallback**: What to return when the circuit is open: cached data, a default value, a degraded response, or a fast error.
+
+### How it works
+
+**Without a breaker during a dependency outage:**
+
+1. The dependency stops responding. Calls now take the full 5-second timeout.
+2. At 500 requests/sec, after 5 seconds there are 2,500 calls in flight.
+3. Each holds a connection from the pool and a pending continuation.
+4. The connection pool exhausts, so unrelated calls to healthy dependencies also start failing.
+5. The failure spreads outward. A single dependency's outage takes down the whole service.
+
+**With a breaker:**
+
+1. The dependency starts failing. The breaker records outcomes in a rolling window.
+2. After 10 calls with more than 50% failures, the breaker opens.
+3. Every subsequent call fails in microseconds without touching the network.
+4. Connections are released immediately, the pool stays healthy, and unrelated calls keep working.
+5. After 30 seconds the breaker goes half-open and allows a few probes. If they succeed, it closes; if not, it reopens for another 30 seconds.
+
+**Why this helps the dependency too:** An overloaded service that receives zero traffic can drain its queues and recover. One that keeps receiving full load, plus retries, cannot. The breaker is as much a courtesy to the dependency as a protection for the caller.
+
+### Why the absence of a breaker becomes a bottleneck
+
+- **Resource exhaustion**: Threads, connections, and memory are held for the full timeout on calls guaranteed to fail.
+- **Cascading failure**: A pool exhausted by one bad dependency starves calls to healthy ones, so one failure becomes many.
+- **Latency inflation**: Every request pays the timeout, so P50 latency becomes the timeout value rather than a tail effect.
+- **Prevented recovery**: Continuing to send load to a struggling dependency stops it from draining and recovering.
+- **Retry compounding**: Retries against a fully down dependency multiply the wasted timeouts by the retry count.
+
+### Example scenarios
+
+#### Scenario 1: A recommendation service outage taking down checkout
+
+**Problem**: Checkout calls a recommendation service for upsells. When recommendations go down, the checkout endpoint's P50 rises to 5 seconds and the connection pool exhausts, so checkout itself starts failing.
+
+```csharp
+// ❌ Bad: every request waits for the full timeout on a dependency that is down
+public async Task<CheckoutView> BuildAsync(Cart cart, CancellationToken ct)
+{
+    var recommendations = await _recommendations.GetAsync(cart.UserId, ct);  // 5s timeout
+    return new CheckoutView(cart, recommendations);
+}
+```
+
+```csharp
+// ✅ Good: breaker + timeout + fallback, so a non-critical dependency cannot break checkout
+public sealed class RecommendationClient
+{
+    private readonly ResiliencePipeline<IReadOnlyList<Product>> _pipeline;
+    private readonly HttpClient _http;
+
+    public RecommendationClient(HttpClient http)
+    {
+        _http = http;
+
+        _pipeline = new ResiliencePipelineBuilder<IReadOnlyList<Product>>()
+            // Inner: cap how long any single attempt may take
+            .AddTimeout(TimeSpan.FromMilliseconds(300))
+            // Outer: stop calling entirely once the dependency is clearly unhealthy
+            .AddCircuitBreaker(new CircuitBreakerStrategyOptions<IReadOnlyList<Product>>
+            {
+                FailureRatio = 0.5,                              // Trip at 50% failures
+                MinimumThroughput = 20,                          // Need 20 calls to judge
+                SamplingDuration = TimeSpan.FromSeconds(30),     // Rolling window
+                BreakDuration = TimeSpan.FromSeconds(15),        // Stay open this long
+                OnOpened = args =>
+                {
+                    _logger.LogWarning("Recommendation circuit opened for {Duration}",
+                        args.BreakDuration);
+                    return default;
+                }
+            })
+            // Degrade gracefully: recommendations are optional for checkout
+            .AddFallback(new FallbackStrategyOptions<IReadOnlyList<Product>>
+            {
+                ShouldHandle = new PredicateBuilder<IReadOnlyList<Product>>()
+                    .Handle<BrokenCircuitException>()
+                    .Handle<TimeoutRejectedException>()
+                    .Handle<HttpRequestException>(),
+                FallbackAction = _ =>
+                    Outcome.FromResultAsValueTask<IReadOnlyList<Product>>(Array.Empty<Product>())
+            })
+            .Build();
+    }
+
+    public Task<IReadOnlyList<Product>> GetAsync(int userId, CancellationToken ct) =>
+        _pipeline.ExecuteAsync(async token =>
+            await _http.GetFromJsonAsync<IReadOnlyList<Product>>(
+                $"/recommendations/{userId}", token) ?? Array.Empty<Product>(), ct)
+        .AsTask();
+}
+```
+
+**Results:**
+- **Bad**: Checkout P50 rises to 5,000 ms, connection pool exhausts, and checkout failure rate reaches about 40%.
+- **Good**: After roughly 20 failed calls the circuit opens. Checkout returns in about 12 ms with an empty recommendations list. Checkout failure rate stays at 0%.
+- **Improvement**: A non-critical dependency's outage becomes invisible to users instead of taking down revenue-critical flow.
+
+#### Scenario 2: Per-dependency breakers instead of one shared breaker
+
+**Problem**: A single breaker wraps calls to three different services. Failures in one open the circuit for all three.
+
+```csharp
+// ❌ Bad: one shared breaker, so an inventory outage blocks pricing and shipping too
+private readonly ResiliencePipeline _shared = BuildBreaker();
+
+public Task<Price> GetPriceAsync(...) => _shared.ExecuteAsync(...);
+public Task<Stock> GetStockAsync(...) => _shared.ExecuteAsync(...);
+public Task<Rate> GetShippingAsync(...) => _shared.ExecuteAsync(...);
+```
+
+```csharp
+// ✅ Good: one breaker per dependency, registered through IHttpClientFactory
+services.AddHttpClient<IPricingClient, PricingClient>()
+    .AddResilienceHandler("pricing", b => b
+        .AddTimeout(TimeSpan.FromMilliseconds(500))
+        .AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
+        {
+            FailureRatio = 0.5,
+            MinimumThroughput = 20,
+            SamplingDuration = TimeSpan.FromSeconds(30),
+            BreakDuration = TimeSpan.FromSeconds(15)
+        }));
+
+services.AddHttpClient<IInventoryClient, InventoryClient>()
+    .AddResilienceHandler("inventory", b => b
+        .AddTimeout(TimeSpan.FromMilliseconds(800))   // Different budget per dependency
+        .AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
+        {
+            FailureRatio = 0.5,
+            MinimumThroughput = 20,
+            SamplingDuration = TimeSpan.FromSeconds(30),
+            BreakDuration = TimeSpan.FromSeconds(15)
+        }));
+// Each dependency also gets its own connection pool, so one cannot starve another.
+```
+
+**Results:**
+- **Bad**: An inventory outage opens the shared circuit, so pricing and shipping calls fail even though those services are healthy.
+- **Good**: Only the inventory circuit opens. Pricing and shipping continue normally.
+- **Improvement**: Blast radius contained to the actually failing dependency.
+
+### Key takeaways
+
+- **Use for:** Every remote dependency: HTTP APIs, gRPC services, databases, caches, message brokers.
+- **Rules:** One breaker per dependency, never one shared. Order the pipeline as retry outside, breaker inside the retry, timeout innermost, so retries do not hammer an open circuit. Always define what happens when the circuit is open: a fallback, cached data, or a fast, clearly-labeled error. Set `MinimumThroughput` high enough that low-traffic noise cannot trip it.
+- **Typical improvements:** Failure latency drops from the timeout value to microseconds. Prevents connection pool exhaustion and cascading failure. Dependency recovery time drops sharply because it stops receiving load.
+- **Trade-off:** An open circuit rejects requests that might have succeeded, so a transient blip can be over-penalized. Tuning is a balance between tripping too eagerly and tripping too late.
+- **Common mistakes:** One breaker for all dependencies. No fallback, so an open circuit is just a different exception. Retrying on top of an open circuit. Break duration so long that recovery is delayed. No metric or alert on circuit state, so nobody knows it opened.
+- **Important:** A circuit breaker does not make failures disappear. It makes them fast, contained, and survivable. The fallback behavior is what determines the user-visible outcome, so design it deliberately.
+
+---
+
+## Avoid Logging in Hot Paths
+
+A log call is not free even when the level is disabled. The arguments are evaluated, value types are boxed into an `object[]`, and any string interpolation runs before the logging framework gets a chance to decide the message will be discarded. In a path executing a million times per second, disabled debug logging can consume a measurable share of CPU and produce hundreds of megabytes per second of garbage for output nobody reads. Guarding with `IsEnabled` or using source-generated logging makes the disabled case genuinely free.
+
+### Key concepts
+
+- **Eager argument evaluation**: C# evaluates all arguments before calling a method. `_logger.LogDebug($"...{Expensive()}")` runs `Expensive()` and builds the string regardless of the level.
+- **`params object[]`**: The classic logging signature allocates an array and boxes every value type argument, on every call.
+- **Message template**: `"Order {OrderId} took {Elapsed}ms"` with arguments passed separately. The framework defers formatting until a sink actually needs the text, and structured sinks store the values as fields rather than formatting at all.
+- **`IsEnabled(level)`**: A cheap check, typically a comparison against a cached minimum level, that lets you skip the whole call.
+- **Source-generated logging**: `[LoggerMessage]` generates a strongly typed method that checks `IsEnabled` first and never allocates an array or boxes anything.
+- **Sink cost**: The work after the logging call: serialization, formatting, and writing to a file, socket, or console. Console output in particular is synchronous and can block on the terminal.
+
+### How it works
+
+**What `_logger.LogDebug($"Processed {id} in {ms}ms")` does when Debug is disabled:**
+
+1. Evaluate `id` and `ms`.
+2. Run the interpolated string handler, formatting both values into a new string. Two `ToString` calls plus one string allocation.
+3. Call `LogDebug` with that string.
+4. The framework checks the level, finds Debug disabled, and discards everything.
+
+All the work in steps 1 through 3 is wasted, and it happens on every call.
+
+**What `_logger.LogDebug("Processed {Id} in {Elapsed}ms", id, ms)` does:**
+
+1. Allocate an `object[2]`.
+2. Box `id` and `ms` into it.
+3. Call the framework, which checks the level and discards.
+
+Better, because no formatting happens, but still three allocations per call.
+
+**What a source-generated method does:**
+
+1. Check `logger.IsEnabled(LogLevel.Debug)`. If false, return immediately.
+2. Nothing else happens. No array, no boxing, no formatting.
+
+Cost when disabled: one branch, effectively zero.
+
+### Why logging in hot paths becomes a bottleneck
+
+- **Allocation volume**: 3 allocations per call at 1 million calls/sec is 3 million objects/sec, which alone can dominate gen0 collection frequency.
+- **Wasted formatting**: Building strings for messages that are discarded is pure CPU with no output.
+- **Synchronous sinks**: A file or console sink that writes inline blocks the request thread for the duration of the I/O, converting a logging decision into a latency problem.
+- **Log volume cost downstream**: 1,000 requests/sec × 20 log lines × 200 bytes is 4 MB/s, roughly 345 GB/day, with real ingestion and storage cost.
+- **Lock contention in the sink**: Many threads writing to one file serialize on the sink's lock, which becomes a hidden global lock in the hottest path of the service.
+
+### Example scenarios
+
+#### Scenario 1: Disabled debug logging in a request loop
+
+**Problem**: A message processor handles 400,000 messages/sec. Allocation profiling shows `object[]` and boxed values as the top allocator even though the log level is Information.
+
+```csharp
+// ❌ Bad: allocates and formats on every call, even though Debug is disabled
+public void Process(Message m)
+{
+    _logger.LogDebug($"Processing message {m.Id} of type {m.Type} at {DateTime.UtcNow:O}");
+    // String interpolation runs, DateTime is formatted, all discarded
+
+    Handle(m);
+}
+```
+
+```csharp
+// ✅ Good: source-generated, zero allocation when disabled
+public static partial class ProcessorLog
+{
+    [LoggerMessage(
+        EventId = 2001,
+        Level = LogLevel.Debug,
+        Message = "Processing message {MessageId} of type {MessageType}")]
+    public static partial void ProcessingMessage(
+        ILogger logger, long messageId, string messageType);
+}
+
+public void Process(Message m)
+{
+    ProcessorLog.ProcessingMessage(_logger, m.Id, m.Type);   // One branch when disabled
+    Handle(m);
+}
+```
+
+```csharp
+// ✅ Also correct when the argument itself is expensive to compute
+public void Process(Message m)
+{
+    if (_logger.IsEnabled(LogLevel.Debug))
+    {
+        // Only pay for the expensive diagnostic when it will actually be emitted
+        _logger.LogDebug("Message {Id} payload: {Payload}", m.Id, m.SerializePayload());
+    }
+
+    Handle(m);
+}
+```
+
+**Results:**
+- **Bad**: 3 allocations plus a `DateTime` format per message. At 400,000 messages/sec that is 1.2 million allocations/sec and roughly 60 MB/s of garbage.
+- **Good**: Zero allocations when Debug is disabled. One predictable branch per message.
+- **Improvement**: About 60 MB/s of garbage removed and roughly 8% of CPU returned to actual work.
+
+#### Scenario 2: A synchronous sink blocking request threads
+
+**Problem**: Under load, P99 latency correlates exactly with disk activity. The file sink writes inline on the request thread.
+
+```csharp
+// ❌ Bad: every log call performs a synchronous file write on the request thread
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.File("logs/app.log")            // Synchronous, and locks per write
+    .CreateLogger();
+```
+
+```csharp
+// ✅ Good: hand off to a background writer with a bounded queue
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Async(a => a.File(
+            "logs/app-.log",
+            rollingInterval: RollingInterval.Day,
+            buffered: true,                  // Batch writes instead of one per line
+            flushToDiskInterval: TimeSpan.FromSeconds(1)),
+        bufferSize: 10_000,                  // Bounded: cannot grow without limit
+        blockWhenFull: false)                // Drop rather than stall the request path
+    .CreateLogger();
+```
+
+**Results:**
+- **Bad**: Each log call costs 0.2–2 ms of blocking file I/O on the request thread. P99 tracks disk latency.
+- **Good**: The request thread enqueues in about 100 ns. A single background thread batches writes.
+- **Improvement**: P99 latency drops by roughly 40% and stops correlating with disk activity. Under extreme load, logs are dropped instead of requests being delayed.
+
+#### Scenario 3: Sampling high-volume events
+
+**Problem**: An access log at 15,000 requests/sec produces 130 GB/day. Most entries are identical successful requests.
+
+```csharp
+// ❌ Bad: log every request at full fidelity
+_logger.LogInformation("Request {Method} {Path} returned {Status} in {Elapsed}ms",
+    method, path, status, elapsed);
+```
+
+```csharp
+// ✅ Good: always log what matters, sample what does not
+public void LogRequest(string method, string path, int status, double elapsed)
+{
+    // Always keep errors and slow requests: these are the ones anyone will look for
+    bool alwaysKeep = status >= 500 || elapsed > 1000;
+
+    // Sample 1% of ordinary successful requests for volume and baseline analysis
+    bool sampled = Random.Shared.Next(100) == 0;
+
+    if (alwaysKeep)
+    {
+        RequestLog.RequestFailed(_logger, method, path, status, elapsed);
+    }
+    else if (sampled)
+    {
+        RequestLog.RequestSampled(_logger, method, path, status, elapsed);
+    }
+
+    // Counters and histograms capture every request with no per-event storage cost
+    _requestCounter.Add(1,
+        new KeyValuePair<string, object?>("method", method),
+        new KeyValuePair<string, object?>("status", status));
+    _requestDuration.Record(elapsed);
+}
+```
+
+**Results:**
+- **Bad**: 130 GB/day of log storage and ingestion, with the interesting events buried in noise.
+- **Good**: About 2 GB/day. Every error and slow request retained, plus a 1% baseline sample. Full-fidelity aggregate data preserved in metrics.
+- **Improvement**: 98% reduction in log volume with no loss of diagnostic capability.
+
+### Key takeaways
+
+- **Use for:** Any code path executing more than a few thousand times per second, and any log call whose arguments are non-trivial to compute.
+- **Rules:** Use `[LoggerMessage]` source generation for anything in a hot path. Guard expensive arguments with `IsEnabled`. Never interpolate into a log message; use message templates with separate arguments. Use an asynchronous, bounded sink. Sample high-volume routine events but always keep errors.
+- **Prefer metrics for high-frequency events:** A counter increment is a few nanoseconds and pre-aggregated. A log line is serialized, shipped, indexed, and stored. Use logs for narrative and context; use metrics for rates and distributions.
+- **Typical improvements:** Elimination of 100% of logging allocations in disabled paths. 30%–50% P99 improvement when moving from a synchronous to an asynchronous sink. 95%+ reduction in log volume from sampling.
+- **Trade-off:** Sampling means some individual events are not recorded. Asynchronous sinks can drop entries under extreme load or lose the tail on an abrupt crash, so flush on graceful shutdown.
+- **Common mistakes:** String interpolation inside log calls. Logging inside the innermost loop. A synchronous console sink in production. An unbounded async queue that grows until OOM. Logging entire objects, which triggers serialization on every call.
+- **Important:** The cheapest log line is the one that is never called. In the hottest paths, prefer a counter or a histogram and keep logging for the boundaries of the operation.
+
+---
+
+## Measure Before Optimizing
+
+Optimization without measurement is guesswork, and intuition about performance is reliably wrong. The bottleneck is rarely where it feels like it should be, and a change that is obviously faster in isolation can be slower in context. Measuring means benchmarking a specific change with a tool that controls for JIT warmup and garbage collection, profiling a running system to find where time actually goes, and tracking percentiles rather than averages so the tail is visible.
+
+### Key concepts
+
+- **Benchmark**: A controlled measurement of a small piece of code, run many times with warmup, statistical analysis, and outlier detection. `Stopwatch` around a loop is not a benchmark.
+- **Tiered compilation**: The JIT first compiles methods quickly with minimal optimization, then recompiles hot methods with full optimization. Measuring before that transition gives numbers that do not reflect steady state.
+- **Dead code elimination**: The JIT removes computations whose results are unused. A benchmark that discards its result may measure an empty loop.
+- **Percentile**: The value below which a given fraction of observations fall. P99 is the latency 99% of requests beat. Averages hide the tail completely.
+- **Coordinated omission**: A measurement artifact where a load generator waits for a slow response before sending the next request, so it never samples the requests that would have arrived during the stall. It makes the tail look far better than reality.
+- **Sampling profiler**: Periodically captures stacks across all threads. Low overhead, safe in production, and shows where wall-clock or CPU time is spent.
+- **Allocation profiler**: Records object allocations and their stacks. Finds GC pressure sources that a CPU profile only shows indirectly as time in the collector.
+
+### How it works
+
+**Why a naive `Stopwatch` measurement misleads:**
+
+1. The first iterations run tier-0 code, which is 2x–10x slower than the final optimized version.
+2. A garbage collection may land inside the measured window, or may not, making runs differ by 30% at random.
+3. If the result is not consumed, the JIT may delete the work entirely and report near-zero time.
+4. Constant inputs may be folded at compile time, so the loop measures nothing.
+5. One run gives one number with no variance information, so you cannot tell a 3% improvement from noise.
+
+**What a proper benchmark harness does:**
+
+1. Runs a pilot phase to determine how many invocations are needed per iteration for a stable measurement.
+2. Runs warmup iterations until timings stabilize, ensuring tier-1 code is in place.
+3. Runs many measured iterations, in a separate process per configuration to avoid cross-contamination.
+4. Consumes results so nothing is eliminated.
+5. Reports mean, standard deviation, and outliers, plus allocation per operation when requested.
+
+**Why percentiles and not averages:** With 99 requests at 10 ms and 1 request at 5,000 ms, the average is 60 ms, which describes no actual request. The P50 is 10 ms and the P99 is 5,000 ms, which correctly describes both the typical experience and the worst one. Users experience percentiles; dashboards showing only averages hide exactly the problem you are looking for.
+
+**Why coordinated omission matters:** A closed-loop load test with 100 virtual users sends the next request only after the previous one returns. If the server stalls for 2 seconds, those 100 users send nothing during the stall, so the requests that would have queued are never measured. The reported P99 can be an order of magnitude better than what real, open-loop traffic experiences. Fixed-rate load generators avoid this by sending on a schedule regardless of response timing.
+
+### Why optimizing without measurement fails
+
+- **Wrong target**: Time spent optimizing a function that accounts for 2% of runtime yields at most a 2% improvement, no matter how much faster it becomes.
+- **Regressions look like improvements**: Without a baseline and variance, a 5% slowdown inside normal noise reads as unchanged, and gets shipped.
+- **Micro-benchmarks that do not transfer**: A change that is faster in isolation can be slower in the real system because it changes cache behavior, allocation patterns, or inlining decisions.
+- **The tail is invisible**: Average latency can improve while P99 gets worse, which is the outcome users actually notice.
+- **Complexity with no payoff**: Unmeasured optimization adds permanent maintenance cost for an unknown, often zero, benefit.
+
+### Example scenarios
+
+#### Scenario 1: A benchmark that measures nothing
+
+**Problem**: A `Stopwatch` test reports that a new parser is 40x faster. In production it is marginally slower.
+
+```csharp
+// ❌ Bad: no warmup, result unused, single run, GC uncontrolled
+var sw = Stopwatch.StartNew();
+for (int i = 0; i < 1_000_000; i++)
+{
+    Parse(input);            // Result discarded: the JIT may delete the whole call
+}
+Console.WriteLine(sw.ElapsedMilliseconds);
+```
+
+```csharp
+// ✅ Good: a harness that controls warmup, consumption, and statistics
+[MemoryDiagnoser]                    // Also report allocations per operation
+[SimpleJob(RuntimeMoniker.Net80)]
+public class ParserBenchmarks
+{
+    private string _input = null!;
+
+    [GlobalSetup]
+    public void Setup() => _input = File.ReadAllText("sample.log");
+
+    [Benchmark(Baseline = true)]
+    public LogEntry ParseWithSplit() => OldParser.Parse(_input);   // Result returned, so consumed
+
+    [Benchmark]
+    public LogEntry ParseWithSpan() => NewParser.Parse(_input);
+}
+
+// Output:
+// | Method         | Mean      | Ratio | Allocated |
+// |--------------- |----------:|------:|----------:|
+// | ParseWithSplit | 842.1 ns  |  1.00 |     416 B |
+// | ParseWithSpan  | 231.4 ns  |  0.27 |      64 B |
+```
+
+**Results:**
+- **Bad**: Reports a 40x improvement that is an artifact of dead code elimination and cold-start timing.
+- **Good**: Reports a real 3.6x improvement with an 85% allocation reduction, and the variance needed to trust it.
+- **Improvement**: The decision is based on a number that survives contact with production.
+
+#### Scenario 2: Finding the real bottleneck
+
+**Problem**: An endpoint takes 340 ms. The team assumes it is JSON serialization and spends a week optimizing it, gaining 4 ms.
+
+```csharp
+// ❌ Bad: optimize based on assumption
+// "Serialization must be slow, it handles a big object"
+```
+
+```bash
+# ✅ Good: profile first, then act on what it shows
+dotnet-trace collect --process-id $(pgrep -f MyApi) \
+    --profile cpu-sampling --duration 00:00:30
+
+# Convert and inspect as a flame graph
+dotnet-trace convert trace.nettrace --format speedscope
+
+# What the profile actually shows:
+#   62%  Npgsql.NpgsqlDataReader.ReadAsync        <- database wait, not CPU
+#   18%  System.Text.RegularExpressions.Regex.Match
+#    9%  System.Text.Json.JsonSerializer.Serialize
+#    5%  everything else
+```
+
+```csharp
+// The regex turned out to be recompiled on every call. One line fixes 18%.
+// ❌ Before: constructed per invocation
+var match = new Regex(@"^(\w+)-(\d+)$").Match(input);
+
+// ✅ After: compiled once at startup via source generation
+[GeneratedRegex(@"^(\w+)-(\d+)$")]
+private static partial Regex CodePattern();
+
+var match = CodePattern().Match(input);
+```
+
+```bash
+# And the 62%: the profile pointed at a missing index, confirmed with EXPLAIN.
+```
+
+**Results:**
+- **Bad**: A week spent on serialization, which was 9% of the time. Total gain about 4 ms out of 340 ms.
+- **Good**: The profile identified a missing index (62%) and a per-call regex construction (18%). Two changes took an afternoon and brought the endpoint to 61 ms.
+- **Improvement**: About 5.5x, targeting where the time actually was.
+
+#### Scenario 3: Averages hiding the tail
+
+**Problem**: A dashboard shows average latency of 45 ms and everything looks healthy, but support tickets report frequent multi-second waits.
+
+```csharp
+// ❌ Bad: a single average discards the entire distribution
+private static long _totalMs;
+private static long _count;
+
+public void Record(double elapsedMs)
+{
+    Interlocked.Add(ref _totalMs, (long)elapsedMs);
+    Interlocked.Increment(ref _count);
+}
+// average = 45 ms. Says nothing about how bad the worst requests are.
+```
+
+```csharp
+// ✅ Good: a histogram preserves the distribution so percentiles can be computed
+public sealed class RequestMetrics
+{
+    private static readonly Meter Meter = new("MyApi", "1.0.0");
+
+    private static readonly Histogram<double> Duration =
+        Meter.CreateHistogram<double>(
+            "http.server.request.duration",
+            unit: "ms",
+            description: "Request duration");
+
+    public static void Record(double elapsedMs, string route, int statusCode)
+    {
+        Duration.Record(elapsedMs,
+            new KeyValuePair<string, object?>("route", route),          // Low cardinality
+            new KeyValuePair<string, object?>("status", statusCode));
+        // Never tag with user id, request id, or any unbounded value:
+        // cardinality explosion will take down the metrics backend.
+    }
+}
+
+// The histogram reveals:
+//   P50:    12 ms
+//   P95:    38 ms
+//   P99:  2,850 ms      <- 1 in 100 users waits nearly 3 seconds
+//   P99.9: 8,100 ms
+```
+
+**Results:**
+- **Bad**: One number that no user experiences, and which cannot reveal that 1% of requests are 200x slower than typical.
+- **Good**: The distribution shows a sharp tail, which turned out to be connection pool waits during GC pauses.
+- **Improvement**: The problem became visible and diagnosable instead of appearing only as support tickets.
+
+### Key takeaways
+
+- **Use for:** Every performance change, without exception. Measure before to find the target, and after to confirm the gain.
+- **Rules:** Benchmark with a real harness, never a raw `Stopwatch` in Debug. Return or consume results so nothing is eliminated. Profile the running system to choose what to optimize. Track P50, P95, and P99, never averages alone. Use fixed-rate load generation to avoid coordinated omission. Keep metric tag cardinality low.
+- **Tooling in .NET:** BenchmarkDotNet for micro-benchmarks, `dotnet-counters` for live GC, thread pool, and exception rates, `dotnet-trace` for CPU sampling and flame graphs, `dotnet-gcdump` for heap retention, and `Meter`/`ActivitySource` for production metrics and traces.
+- **Typical outcome:** Profiling commonly reveals that the actual bottleneck is somewhere nobody proposed, and that the assumed hotspot accounts for under 10% of the time.
+- **Trade-off:** Measurement takes time up front and requires infrastructure. It is almost always cheaper than optimizing the wrong thing.
+- **Common mistakes:** Benchmarking a Debug build. No warmup. Discarding the benchmark result. Optimizing based on intuition. Reporting averages. Closed-loop load tests that hide the tail. Metric tags with unbounded cardinality.
+- **Important:** Establish a baseline and put a performance check in CI. An optimization with no regression test decays silently over the following months.
 
 ---

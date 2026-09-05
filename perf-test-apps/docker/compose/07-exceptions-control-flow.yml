@@ -1,0 +1,79 @@
+# 07-exceptions-control-flow - Exceptions for control flow vs checks
+#
+# Generated file. Enable with ENABLE_07_EXCEPTIONS_CONTROL_FLOW=true in .env, then:
+#     ./run.sh up exceptions-control-flow
+#
+# Services:
+#   07-exceptions-control-flow-py-incorrect
+#   07-exceptions-control-flow-py-correct
+#   07-exceptions-control-flow-js-incorrect
+#   07-exceptions-control-flow-js-correct
+
+services:
+  07-exceptions-control-flow-py-incorrect:
+    profiles: ["ENABLE_07_EXCEPTIONS_CONTROL_FLOW_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 07-exceptions-control-flow-py-incorrect
+    command: ["python3", "07-exceptions-control-flow/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  07-exceptions-control-flow-py-correct:
+    profiles: ["ENABLE_07_EXCEPTIONS_CONTROL_FLOW_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 07-exceptions-control-flow-py-correct
+    command: ["python3", "07-exceptions-control-flow/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  07-exceptions-control-flow-js-incorrect:
+    profiles: ["ENABLE_07_EXCEPTIONS_CONTROL_FLOW_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 07-exceptions-control-flow-js-incorrect
+    command: ["node", "07-exceptions-control-flow/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  07-exceptions-control-flow-js-correct:
+    profiles: ["ENABLE_07_EXCEPTIONS_CONTROL_FLOW_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 07-exceptions-control-flow-js-correct
+    command: ["node", "07-exceptions-control-flow/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

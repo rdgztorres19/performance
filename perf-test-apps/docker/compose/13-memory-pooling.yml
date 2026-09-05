@@ -1,0 +1,115 @@
+# 13-memory-pooling - New buffer per use vs pooling
+#
+# Generated file. Enable with ENABLE_13_MEMORY_POOLING=true in .env, then:
+#     ./run.sh up memory-pooling
+#
+# Services:
+#   13-memory-pooling-py-incorrect
+#   13-memory-pooling-py-correct
+#   13-memory-pooling-js-incorrect
+#   13-memory-pooling-js-correct
+#   13-memory-pooling-c-incorrect
+#   13-memory-pooling-c-correct
+
+services:
+  13-memory-pooling-py-incorrect:
+    profiles: ["ENABLE_13_MEMORY_POOLING_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 13-memory-pooling-py-incorrect
+    command: ["python3", "13-memory-pooling/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  13-memory-pooling-py-correct:
+    profiles: ["ENABLE_13_MEMORY_POOLING_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 13-memory-pooling-py-correct
+    command: ["python3", "13-memory-pooling/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  13-memory-pooling-js-incorrect:
+    profiles: ["ENABLE_13_MEMORY_POOLING_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 13-memory-pooling-js-incorrect
+    command: ["node", "13-memory-pooling/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  13-memory-pooling-js-correct:
+    profiles: ["ENABLE_13_MEMORY_POOLING_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 13-memory-pooling-js-correct
+    command: ["node", "13-memory-pooling/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  13-memory-pooling-c-incorrect:
+    profiles: ["ENABLE_13_MEMORY_POOLING_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 13-memory-pooling-c-incorrect
+    command: ["/app/13-memory-pooling/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  13-memory-pooling-c-correct:
+    profiles: ["ENABLE_13_MEMORY_POOLING_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 13-memory-pooling-c-correct
+    command: ["/app/13-memory-pooling/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

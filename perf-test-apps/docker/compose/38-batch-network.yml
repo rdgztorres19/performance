@@ -1,0 +1,73 @@
+# 38-batch-network - One request per item vs batched requests
+#
+# Generated file. Enable with ENABLE_38_BATCH_NETWORK=true in .env, then:
+#     ./run.sh up batch-network
+#
+# Services:
+#   38-batch-network-server (helper, started automatically)
+#   38-batch-network-py-incorrect
+#   38-batch-network-py-correct
+
+services:
+  38-batch-network-server:
+    profiles: ["ENABLE_38_BATCH_NETWORK_PY_INCORRECT", "ENABLE_38_BATCH_NETWORK_PY_CORRECT"]
+    labels:
+      perf-demo.role: "helper"
+    image: perf-demo-python:local
+    container_name: 38-batch-network-server
+    command: ["python3", "38-batch-network/_batch_server.py"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket,sys; s=socket.create_connection(('127.0.0.1',9102),1); s.close()"]
+      interval: 1s
+      timeout: 2s
+      retries: 15
+      start_period: 1s
+    environment:
+      PORT: "9102"
+      HOST: "0.0.0.0"
+    working_dir: /app
+    restart: "no"
+
+  38-batch-network-py-incorrect:
+    profiles: ["ENABLE_38_BATCH_NETWORK_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 38-batch-network-py-incorrect
+    command: ["python3", "38-batch-network/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+      SERVER_HOST: "38-batch-network-server"
+      SERVER_PORT: "9102"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    depends_on:
+      38-batch-network-server:
+        condition: service_healthy
+    restart: "no"
+
+  38-batch-network-py-correct:
+    profiles: ["ENABLE_38_BATCH_NETWORK_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 38-batch-network-py-correct
+    command: ["python3", "38-batch-network/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+      SERVER_HOST: "38-batch-network-server"
+      SERVER_PORT: "9102"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    depends_on:
+      38-batch-network-server:
+        condition: service_healthy
+    restart: "no"

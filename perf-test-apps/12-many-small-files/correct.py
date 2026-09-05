@@ -20,7 +20,7 @@ def main():
     start = time.perf_counter()
     laps = 0
     try:
-        with os.fdopen(fd, 'w') as f:
+        with os.fdopen(fd, 'w+') as f:
             while not stop and (time.perf_counter() - start) < DURATION_SEC:
                 f.seek(0)
                 f.truncate()
@@ -33,7 +33,10 @@ def main():
                     total += len(line)
                 laps += 1
     finally:
-        os.unlink(path)
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
     print(f"Stopped: {laps} laps")
 
 if __name__ == "__main__":

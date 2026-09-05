@@ -1,0 +1,43 @@
+# 36-throttling-rate-limiting - Unlimited rate vs throttled
+#
+# Generated file. Enable with ENABLE_36_THROTTLING_RATE_LIMITING=true in .env, then:
+#     ./run.sh up throttling-rate-limiting
+#
+# Services:
+#   36-throttling-rate-limiting-py-incorrect
+#   36-throttling-rate-limiting-py-correct
+
+services:
+  36-throttling-rate-limiting-py-incorrect:
+    profiles: ["ENABLE_36_THROTTLING_RATE_LIMITING_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 36-throttling-rate-limiting-py-incorrect
+    command: ["python3", "36-throttling-rate-limiting/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  36-throttling-rate-limiting-py-correct:
+    profiles: ["ENABLE_36_THROTTLING_RATE_LIMITING_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 36-throttling-rate-limiting-py-correct
+    command: ["python3", "36-throttling-rate-limiting/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

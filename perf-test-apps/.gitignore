@@ -1,0 +1,11 @@
+# Local switches. .env.example is the committed default (everything disabled).
+.env
+
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Scratch data some demos write when run outside Docker.
+/data/
+*.log

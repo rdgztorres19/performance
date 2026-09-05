@@ -1,0 +1,115 @@
+# 04-memory-allocation - Constant allocation vs reuse
+#
+# Generated file. Enable with ENABLE_04_MEMORY_ALLOCATION=true in .env, then:
+#     ./run.sh up memory-allocation
+#
+# Services:
+#   04-memory-allocation-py-incorrect
+#   04-memory-allocation-py-correct
+#   04-memory-allocation-js-incorrect
+#   04-memory-allocation-js-correct
+#   04-memory-allocation-c-incorrect
+#   04-memory-allocation-c-correct
+
+services:
+  04-memory-allocation-py-incorrect:
+    profiles: ["ENABLE_04_MEMORY_ALLOCATION_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 04-memory-allocation-py-incorrect
+    command: ["python3", "04-memory-allocation/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  04-memory-allocation-py-correct:
+    profiles: ["ENABLE_04_MEMORY_ALLOCATION_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 04-memory-allocation-py-correct
+    command: ["python3", "04-memory-allocation/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  04-memory-allocation-js-incorrect:
+    profiles: ["ENABLE_04_MEMORY_ALLOCATION_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 04-memory-allocation-js-incorrect
+    command: ["node", "04-memory-allocation/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  04-memory-allocation-js-correct:
+    profiles: ["ENABLE_04_MEMORY_ALLOCATION_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 04-memory-allocation-js-correct
+    command: ["node", "04-memory-allocation/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  04-memory-allocation-c-incorrect:
+    profiles: ["ENABLE_04_MEMORY_ALLOCATION_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 04-memory-allocation-c-incorrect
+    command: ["/app/04-memory-allocation/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  04-memory-allocation-c-correct:
+    profiles: ["ENABLE_04_MEMORY_ALLOCATION_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 04-memory-allocation-c-correct
+    command: ["/app/04-memory-allocation/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

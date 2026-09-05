@@ -1,0 +1,79 @@
+# 02-busy-wait - Spin loop vs event/sleep
+#
+# Generated file. Enable with ENABLE_02_BUSY_WAIT=true in .env, then:
+#     ./run.sh up busy-wait
+#
+# Services:
+#   02-busy-wait-py-incorrect
+#   02-busy-wait-py-correct
+#   02-busy-wait-js-incorrect
+#   02-busy-wait-js-correct
+
+services:
+  02-busy-wait-py-incorrect:
+    profiles: ["ENABLE_02_BUSY_WAIT_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 02-busy-wait-py-incorrect
+    command: ["python3", "02-busy-wait/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  02-busy-wait-py-correct:
+    profiles: ["ENABLE_02_BUSY_WAIT_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 02-busy-wait-py-correct
+    command: ["python3", "02-busy-wait/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  02-busy-wait-js-incorrect:
+    profiles: ["ENABLE_02_BUSY_WAIT_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 02-busy-wait-js-incorrect
+    command: ["node", "02-busy-wait/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  02-busy-wait-js-correct:
+    profiles: ["ENABLE_02_BUSY_WAIT_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 02-busy-wait-js-correct
+    command: ["node", "02-busy-wait/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

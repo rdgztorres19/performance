@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """Mini TCP server for connection-pooling demo. Run: python _server.py"""
+import os
 import socket
+
+# Bind to 0.0.0.0 in a container so other containers can reach it.
+HOST = os.getenv('HOST', '127.0.0.1')
+PORT = int(os.getenv('PORT', '9999'))
+
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(('127.0.0.1', 9999))
-s.listen(5)
-print("Server on 127.0.0.1:9999")
+s.bind((HOST, PORT))
+s.listen(128)
+print(f"Server on {HOST}:{PORT}", flush=True)
 while True:
     c, _ = s.accept()
     while True:

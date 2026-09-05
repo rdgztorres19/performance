@@ -1,0 +1,43 @@
+# 20-stream-files - Reading a whole file vs streaming
+#
+# Generated file. Enable with ENABLE_20_STREAM_FILES=true in .env, then:
+#     ./run.sh up stream-files
+#
+# Services:
+#   20-stream-files-py-incorrect
+#   20-stream-files-py-correct
+
+services:
+  20-stream-files-py-incorrect:
+    profiles: ["ENABLE_20_STREAM_FILES_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 20-stream-files-py-incorrect
+    command: ["python3", "20-stream-files/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  20-stream-files-py-correct:
+    profiles: ["ENABLE_20_STREAM_FILES_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 20-stream-files-py-correct
+    command: ["python3", "20-stream-files/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

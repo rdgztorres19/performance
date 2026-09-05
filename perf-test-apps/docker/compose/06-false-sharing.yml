@@ -1,0 +1,115 @@
+# 06-false-sharing - Shared cache line vs per-thread state
+#
+# Generated file. Enable with ENABLE_06_FALSE_SHARING=true in .env, then:
+#     ./run.sh up false-sharing
+#
+# Services:
+#   06-false-sharing-py-incorrect
+#   06-false-sharing-py-correct
+#   06-false-sharing-js-incorrect
+#   06-false-sharing-js-correct
+#   06-false-sharing-c-incorrect
+#   06-false-sharing-c-correct
+
+services:
+  06-false-sharing-py-incorrect:
+    profiles: ["ENABLE_06_FALSE_SHARING_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 06-false-sharing-py-incorrect
+    command: ["python3", "06-false-sharing/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  06-false-sharing-py-correct:
+    profiles: ["ENABLE_06_FALSE_SHARING_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 06-false-sharing-py-correct
+    command: ["python3", "06-false-sharing/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  06-false-sharing-js-incorrect:
+    profiles: ["ENABLE_06_FALSE_SHARING_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 06-false-sharing-js-incorrect
+    command: ["node", "06-false-sharing/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  06-false-sharing-js-correct:
+    profiles: ["ENABLE_06_FALSE_SHARING_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 06-false-sharing-js-correct
+    command: ["node", "06-false-sharing/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  06-false-sharing-c-incorrect:
+    profiles: ["ENABLE_06_FALSE_SHARING_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 06-false-sharing-c-incorrect
+    command: ["/app/06-false-sharing/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  06-false-sharing-c-correct:
+    profiles: ["ENABLE_06_FALSE_SHARING_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 06-false-sharing-c-correct
+    command: ["/app/06-false-sharing/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

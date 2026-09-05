@@ -28,6 +28,36 @@ node 01-context-switching/incorrect.js
 node 01-context-switching/correct.js
 ```
 
+
+## Ejecución con Docker
+
+Cada tema tiene su propio archivo compose y **todo viene deshabilitado por
+defecto**. Se habilita lo que interese en `.env` y solo eso se crea y se ejecuta.
+
+```bash
+cd perf-test-apps
+
+./run.sh list          # ver los 39 temas y cuáles están habilitados
+# editar .env:  ENABLE_09_RANDOM_IO=true
+./run.sh up            # construye y ejecuta solo lo habilitado
+```
+
+Cada tema habilitado levanta hasta cuatro contenedores para comparar en paralelo:
+
+```
+09-random-io-py-incorrect     09-random-io-py-correct
+09-random-io-js-incorrect     09-random-io-js-correct
+```
+
+| Comando | Qué hace |
+|---|---|
+| `./run.sh list` | Lista los temas, su estado y sus lenguajes |
+| `./run.sh up` | Ejecuta todos los temas habilitados |
+| `./run.sh up random-io` | Ejecuta un tema sin tocar `.env` |
+| `./run.sh down` | Detiene y elimina los contenedores |
+
+Detalles completos en [docker/README.md](docker/README.md).
+
 ## Tópicos
 
 | Carpeta | Tema | Cómo medir |

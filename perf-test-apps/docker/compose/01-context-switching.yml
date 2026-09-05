@@ -1,0 +1,115 @@
+# 01-context-switching - Too many threads vs one worker per core
+#
+# Generated file. Enable with ENABLE_01_CONTEXT_SWITCHING=true in .env, then:
+#     ./run.sh up context-switching
+#
+# Services:
+#   01-context-switching-py-incorrect
+#   01-context-switching-py-correct
+#   01-context-switching-js-incorrect
+#   01-context-switching-js-correct
+#   01-context-switching-c-incorrect
+#   01-context-switching-c-correct
+
+services:
+  01-context-switching-py-incorrect:
+    profiles: ["ENABLE_01_CONTEXT_SWITCHING_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 01-context-switching-py-incorrect
+    command: ["python3", "01-context-switching/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  01-context-switching-py-correct:
+    profiles: ["ENABLE_01_CONTEXT_SWITCHING_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 01-context-switching-py-correct
+    command: ["python3", "01-context-switching/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  01-context-switching-js-incorrect:
+    profiles: ["ENABLE_01_CONTEXT_SWITCHING_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 01-context-switching-js-incorrect
+    command: ["node", "01-context-switching/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  01-context-switching-js-correct:
+    profiles: ["ENABLE_01_CONTEXT_SWITCHING_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 01-context-switching-js-correct
+    command: ["node", "01-context-switching/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  01-context-switching-c-incorrect:
+    profiles: ["ENABLE_01_CONTEXT_SWITCHING_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 01-context-switching-c-incorrect
+    command: ["/app/01-context-switching/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  01-context-switching-c-correct:
+    profiles: ["ENABLE_01_CONTEXT_SWITCHING_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 01-context-switching-c-correct
+    command: ["/app/01-context-switching/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

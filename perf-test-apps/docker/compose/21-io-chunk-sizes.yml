@@ -1,0 +1,43 @@
+# 21-io-chunk-sizes - 64-byte chunks vs 64 KB chunks
+#
+# Generated file. Enable with ENABLE_21_IO_CHUNK_SIZES=true in .env, then:
+#     ./run.sh up io-chunk-sizes
+#
+# Services:
+#   21-io-chunk-sizes-py-incorrect
+#   21-io-chunk-sizes-py-correct
+
+services:
+  21-io-chunk-sizes-py-incorrect:
+    profiles: ["ENABLE_21_IO_CHUNK_SIZES_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 21-io-chunk-sizes-py-incorrect
+    command: ["python3", "21-io-chunk-sizes/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  21-io-chunk-sizes-py-correct:
+    profiles: ["ENABLE_21_IO_CHUNK_SIZES_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 21-io-chunk-sizes-py-correct
+    command: ["python3", "21-io-chunk-sizes/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

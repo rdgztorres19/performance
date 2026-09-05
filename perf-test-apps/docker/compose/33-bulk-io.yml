@@ -1,0 +1,43 @@
+# 33-bulk-io - Byte-at-a-time vs bulk read/write
+#
+# Generated file. Enable with ENABLE_33_BULK_IO=true in .env, then:
+#     ./run.sh up bulk-io
+#
+# Services:
+#   33-bulk-io-py-incorrect
+#   33-bulk-io-py-correct
+
+services:
+  33-bulk-io-py-incorrect:
+    profiles: ["ENABLE_33_BULK_IO_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 33-bulk-io-py-incorrect
+    command: ["python3", "33-bulk-io/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  33-bulk-io-py-correct:
+    profiles: ["ENABLE_33_BULK_IO_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 33-bulk-io-py-correct
+    command: ["python3", "33-bulk-io/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

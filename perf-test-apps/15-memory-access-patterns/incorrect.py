@@ -3,6 +3,7 @@
 INCORRECT: Random access - prefetcher can't help.
 Resume: "Optimize Memory Access Patterns"
 """
+import os
 import random
 import signal
 import time

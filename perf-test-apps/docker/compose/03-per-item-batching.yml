@@ -1,0 +1,79 @@
+# 03-per-item-batching - Per-item processing vs batching
+#
+# Generated file. Enable with ENABLE_03_PER_ITEM_BATCHING=true in .env, then:
+#     ./run.sh up per-item-batching
+#
+# Services:
+#   03-per-item-batching-py-incorrect
+#   03-per-item-batching-py-correct
+#   03-per-item-batching-js-incorrect
+#   03-per-item-batching-js-correct
+
+services:
+  03-per-item-batching-py-incorrect:
+    profiles: ["ENABLE_03_PER_ITEM_BATCHING_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 03-per-item-batching-py-incorrect
+    command: ["python3", "03-per-item-batching/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  03-per-item-batching-py-correct:
+    profiles: ["ENABLE_03_PER_ITEM_BATCHING_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 03-per-item-batching-py-correct
+    command: ["python3", "03-per-item-batching/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  03-per-item-batching-js-incorrect:
+    profiles: ["ENABLE_03_PER_ITEM_BATCHING_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 03-per-item-batching-js-incorrect
+    command: ["node", "03-per-item-batching/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  03-per-item-batching-js-correct:
+    profiles: ["ENABLE_03_PER_ITEM_BATCHING_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 03-per-item-batching-js-correct
+    command: ["node", "03-per-item-batching/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

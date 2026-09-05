@@ -1,0 +1,79 @@
+# 12-many-small-files - Many small files vs one file
+#
+# Generated file. Enable with ENABLE_12_MANY_SMALL_FILES=true in .env, then:
+#     ./run.sh up many-small-files
+#
+# Services:
+#   12-many-small-files-py-incorrect
+#   12-many-small-files-py-correct
+#   12-many-small-files-js-incorrect
+#   12-many-small-files-js-correct
+
+services:
+  12-many-small-files-py-incorrect:
+    profiles: ["ENABLE_12_MANY_SMALL_FILES_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 12-many-small-files-py-incorrect
+    command: ["python3", "12-many-small-files/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  12-many-small-files-py-correct:
+    profiles: ["ENABLE_12_MANY_SMALL_FILES_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 12-many-small-files-py-correct
+    command: ["python3", "12-many-small-files/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  12-many-small-files-js-incorrect:
+    profiles: ["ENABLE_12_MANY_SMALL_FILES_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 12-many-small-files-js-incorrect
+    command: ["node", "12-many-small-files/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  12-many-small-files-js-correct:
+    profiles: ["ENABLE_12_MANY_SMALL_FILES_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 12-many-small-files-js-correct
+    command: ["node", "12-many-small-files/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

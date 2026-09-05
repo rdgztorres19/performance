@@ -1,0 +1,43 @@
+# 39-binary-protocols - Text protocol vs binary protocol
+#
+# Generated file. Enable with ENABLE_39_BINARY_PROTOCOLS=true in .env, then:
+#     ./run.sh up binary-protocols
+#
+# Services:
+#   39-binary-protocols-py-incorrect
+#   39-binary-protocols-py-correct
+
+services:
+  39-binary-protocols-py-incorrect:
+    profiles: ["ENABLE_39_BINARY_PROTOCOLS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 39-binary-protocols-py-incorrect
+    command: ["python3", "39-binary-protocols/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  39-binary-protocols-py-correct:
+    profiles: ["ENABLE_39_BINARY_PROTOCOLS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 39-binary-protocols-py-correct
+    command: ["python3", "39-binary-protocols/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

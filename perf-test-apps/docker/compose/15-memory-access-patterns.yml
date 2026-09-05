@@ -1,0 +1,115 @@
+# 15-memory-access-patterns - Random memory access vs sequential
+#
+# Generated file. Enable with ENABLE_15_MEMORY_ACCESS_PATTERNS=true in .env, then:
+#     ./run.sh up memory-access-patterns
+#
+# Services:
+#   15-memory-access-patterns-py-incorrect
+#   15-memory-access-patterns-py-correct
+#   15-memory-access-patterns-js-incorrect
+#   15-memory-access-patterns-js-correct
+#   15-memory-access-patterns-c-incorrect
+#   15-memory-access-patterns-c-correct
+
+services:
+  15-memory-access-patterns-py-incorrect:
+    profiles: ["ENABLE_15_MEMORY_ACCESS_PATTERNS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 15-memory-access-patterns-py-incorrect
+    command: ["python3", "15-memory-access-patterns/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  15-memory-access-patterns-py-correct:
+    profiles: ["ENABLE_15_MEMORY_ACCESS_PATTERNS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 15-memory-access-patterns-py-correct
+    command: ["python3", "15-memory-access-patterns/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  15-memory-access-patterns-js-incorrect:
+    profiles: ["ENABLE_15_MEMORY_ACCESS_PATTERNS_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 15-memory-access-patterns-js-incorrect
+    command: ["node", "15-memory-access-patterns/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  15-memory-access-patterns-js-correct:
+    profiles: ["ENABLE_15_MEMORY_ACCESS_PATTERNS_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 15-memory-access-patterns-js-correct
+    command: ["node", "15-memory-access-patterns/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  15-memory-access-patterns-c-incorrect:
+    profiles: ["ENABLE_15_MEMORY_ACCESS_PATTERNS_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 15-memory-access-patterns-c-incorrect
+    command: ["/app/15-memory-access-patterns/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  15-memory-access-patterns-c-correct:
+    profiles: ["ENABLE_15_MEMORY_ACCESS_PATTERNS_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 15-memory-access-patterns-c-correct
+    command: ["/app/15-memory-access-patterns/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

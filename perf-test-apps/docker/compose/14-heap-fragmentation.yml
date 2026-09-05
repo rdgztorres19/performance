@@ -1,0 +1,43 @@
+# 14-heap-fragmentation - Mixed-size allocations vs grouped
+#
+# Generated file. Enable with ENABLE_14_HEAP_FRAGMENTATION=true in .env, then:
+#     ./run.sh up heap-fragmentation
+#
+# Services:
+#   14-heap-fragmentation-py-incorrect
+#   14-heap-fragmentation-py-correct
+
+services:
+  14-heap-fragmentation-py-incorrect:
+    profiles: ["ENABLE_14_HEAP_FRAGMENTATION_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 14-heap-fragmentation-py-incorrect
+    command: ["python3", "14-heap-fragmentation/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  14-heap-fragmentation-py-correct:
+    profiles: ["ENABLE_14_HEAP_FRAGMENTATION_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 14-heap-fragmentation-py-correct
+    command: ["python3", "14-heap-fragmentation/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

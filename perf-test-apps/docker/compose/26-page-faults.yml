@@ -1,0 +1,79 @@
+# 26-page-faults - Page-fault heavy vs resident working set
+#
+# Generated file. Enable with ENABLE_26_PAGE_FAULTS=true in .env, then:
+#     ./run.sh up page-faults
+#
+# Services:
+#   26-page-faults-py-incorrect
+#   26-page-faults-py-correct
+#   26-page-faults-c-incorrect
+#   26-page-faults-c-correct
+
+services:
+  26-page-faults-py-incorrect:
+    profiles: ["ENABLE_26_PAGE_FAULTS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 26-page-faults-py-incorrect
+    command: ["python3", "26-page-faults/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  26-page-faults-py-correct:
+    profiles: ["ENABLE_26_PAGE_FAULTS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 26-page-faults-py-correct
+    command: ["python3", "26-page-faults/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  26-page-faults-c-incorrect:
+    profiles: ["ENABLE_26_PAGE_FAULTS_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 26-page-faults-c-incorrect
+    command: ["/app/26-page-faults/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  26-page-faults-c-correct:
+    profiles: ["ENABLE_26_PAGE_FAULTS_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 26-page-faults-c-correct
+    command: ["/app/26-page-faults/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"

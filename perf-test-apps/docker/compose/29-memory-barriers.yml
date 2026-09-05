@@ -1,0 +1,115 @@
+# 29-memory-barriers - Missing memory barriers vs correct ordering
+#
+# Generated file. Enable with ENABLE_29_MEMORY_BARRIERS=true in .env, then:
+#     ./run.sh up memory-barriers
+#
+# Services:
+#   29-memory-barriers-py-incorrect
+#   29-memory-barriers-py-correct
+#   29-memory-barriers-js-incorrect
+#   29-memory-barriers-js-correct
+#   29-memory-barriers-c-incorrect
+#   29-memory-barriers-c-correct
+
+services:
+  29-memory-barriers-py-incorrect:
+    profiles: ["ENABLE_29_MEMORY_BARRIERS_PY_INCORRECT"]
+    image: perf-demo-python:local
+    container_name: 29-memory-barriers-py-incorrect
+    command: ["python3", "29-memory-barriers/incorrect.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  29-memory-barriers-py-correct:
+    profiles: ["ENABLE_29_MEMORY_BARRIERS_PY_CORRECT"]
+    image: perf-demo-python:local
+    container_name: 29-memory-barriers-py-correct
+    command: ["python3", "29-memory-barriers/correct.py"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  29-memory-barriers-js-incorrect:
+    profiles: ["ENABLE_29_MEMORY_BARRIERS_JS_INCORRECT"]
+    image: perf-demo-node:local
+    container_name: 29-memory-barriers-js-incorrect
+    command: ["node", "29-memory-barriers/incorrect.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  29-memory-barriers-js-correct:
+    profiles: ["ENABLE_29_MEMORY_BARRIERS_JS_CORRECT"]
+    image: perf-demo-node:local
+    container_name: 29-memory-barriers-js-correct
+    command: ["node", "29-memory-barriers/correct.js"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  29-memory-barriers-c-incorrect:
+    profiles: ["ENABLE_29_MEMORY_BARRIERS_C_INCORRECT"]
+    image: perf-demo-c:local
+    container_name: 29-memory-barriers-c-incorrect
+    command: ["/app/29-memory-barriers/incorrect"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
+
+  29-memory-barriers-c-correct:
+    profiles: ["ENABLE_29_MEMORY_BARRIERS_C_CORRECT"]
+    image: perf-demo-c:local
+    container_name: 29-memory-barriers-c-correct
+    command: ["/app/29-memory-barriers/correct"]
+    environment:
+      DURATION_SEC: "${DURATION_SEC:-20}"
+    working_dir: /app
+    tmpfs:
+      - /data:size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-2}"
+          memory: ${MEMORY_LIMIT:-1g}
+    restart: "no"
